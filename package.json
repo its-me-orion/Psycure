@@ -1,0 +1,33 @@
+{
+  "name": "psycure",
+  "version": "1.0.0",
+  "description": "Proof-of-concept Hedera dApp for transparent, privacy-preserving psychotherapy invoicing between patients, therapists, and insurers — DDiB '26 UZH final project.",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network hederaTestnet",
+    "cli": "node src/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/its-me-orion/Psycure.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "6.1.0",
+    "hardhat": "2.28.6",
+    "solc": "^0.8.24"
+  },
+  "dependencies": {
+    "@hashgraph/sdk": "2.24.0",
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.4"
+  }
+}
