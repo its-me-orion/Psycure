@@ -5,13 +5,16 @@ const {
   buildHederaClient,
   ensureTopicId,
   submitTopicMessage,
+  fetchSessionCreated,
   fetchSessionConfirmations,
 } = require("./hcsClient");
 
 const INVOICE_ABI = [
-  "function recordHcsConfirmation(bytes32 sessionId, bool isPatient, string hcsMessageId) external",
+  "function recordHcsConfirmation(bytes32 sessionId, bool isPatient, string hcsMessageId, bytes32 termsHash) external",
   "function finalizeInvoice(bytes32 sessionId, uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external",
-  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId))",
+  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId,bytes32 patientTermsHash,bytes32 therapistTermsHash))",
+  "function defaultPlatformFeeBps() external view returns (uint16)",
+  "function computeTermsHash(uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external pure returns (bytes32)",
 ];
 
 function getContract() {
@@ -36,9 +39,52 @@ function toSessionHash(sessionId) {
 }
 
 /**
- * Creates a session and logs a SESSION_CREATED message to the shared HCS topic.
+ * Deterministically computes the same terms hash the contract itself computes
+ * (see PsycureInvoice.computeTermsHash). Both patient and therapist must arrive
+ * at an identical hash before either is allowed to confirm.
  */
-async function createSession({ sessionId, date, startTime, endTime, patient, therapist }) {
+function computeTermsHash({ sessionRate, franchiseRemaining, copayBps, platformFeeBps }) {
+  return ethers.solidityPackedKeccak256(
+    ["uint256", "uint256", "uint16", "uint16"],
+    [BigInt(sessionRate), BigInt(franchiseRemaining), Number(copayBps), Number(platformFeeBps)]
+  );
+}
+
+/**
+ * Pure JS mirror of the contract's split arithmetic, used to show the patient a
+ * live preview before they confirm anything on-chain. Uses the same truncating
+ * integer division as Solidity so the preview always matches what finalize()
+ * will actually compute.
+ */
+function previewSplit({ sessionRate, franchiseRemaining, copayBps, platformFeeBps }) {
+  const rate = BigInt(sessionRate);
+  const franchise = BigInt(franchiseRemaining);
+  const copay = BigInt(copayBps);
+  const fee = BigInt(platformFeeBps);
+
+  const patientBeforeCopay = franchise >= rate ? rate : franchise;
+  const remainder = rate - patientBeforeCopay;
+  const copayAmount = (remainder * copay) / 10_000n;
+
+  const patientAmount = patientBeforeCopay + copayAmount;
+  const insurerAmount = rate - patientAmount;
+
+  const platformFeeAmount = (rate * fee) / 10_000n;
+  const therapistPayout = rate - platformFeeAmount;
+
+  return {
+    patientAmount: patientAmount.toString(),
+    insurerAmount: insurerAmount.toString(),
+    platformFeeAmount: platformFeeAmount.toString(),
+    therapistPayout: therapistPayout.toString(),
+  };
+}
+
+/**
+ * Step 1 — Therapist creates the session, setting the session rate. Logs
+ * SESSION_CREATED to the shared HCS topic.
+ */
+async function createSession({ sessionId, date, startTime, endTime, patient, therapist, sessionRate }) {
   const client = buildHederaClient();
   const topicId = await ensureTopicId(client);
 
@@ -50,6 +96,7 @@ async function createSession({ sessionId, date, startTime, endTime, patient, the
     endTime,
     patient,
     therapist,
+    sessionRate: String(sessionRate),
   });
 
   return {
@@ -60,12 +107,55 @@ async function createSession({ sessionId, date, startTime, endTime, patient, the
 }
 
 /**
- * Submits a patient or therapist confirmation for an existing session to HCS.
+ * Reads the therapist-set session rate (and other creation details) back from HCS.
+ * Used by the patient view before they enter their franchise/co-pay.
  */
-async function confirmSession({ sessionId, role }) {
+async function getSessionTerms({ sessionId }) {
+  const topicId = process.env.HEDERA_TOPIC_ID;
+  if (!topicId) {
+    throw new Error("Missing HEDERA_TOPIC_ID environment variable");
+  }
+
+  const created = await fetchSessionCreated(topicId, sessionId);
+  if (!created) {
+    throw new Error(`No SESSION_CREATED message found for session ${sessionId}`);
+  }
+
+  return {
+    sessionId,
+    date: created.payload.date,
+    startTime: created.payload.startTime,
+    endTime: created.payload.endTime,
+    patient: created.payload.patient,
+    therapist: created.payload.therapist,
+    sessionRate: created.payload.sessionRate,
+  };
+}
+
+/**
+ * Reads the contract's configured default platform fee (basis points), so both
+ * sides can use a consistent, non-negotiable fee value without typing it in.
+ */
+async function getDefaultPlatformFeeBps() {
+  const contract = getContract();
+  const feeBps = await contract.defaultPlatformFeeBps();
+  return Number(feeBps);
+}
+
+/**
+ * Step 2/3 — Either party confirms a session *with specific settlement terms*.
+ * The terms hash is computed client-side (here, server-side on their behalf)
+ * from the exact same parameters the contract will later re-hash at finalize.
+ * The full terms are also included in the HCS message body (not just the hash)
+ * so the other party — and anyone auditing the topic — can see exactly what was
+ * agreed, not just an opaque hash.
+ */
+async function confirmSession({ sessionId, role, sessionRate, franchiseRemaining, copayBps, platformFeeBps }) {
   if (role !== "patient" && role !== "therapist") {
     throw new Error("role must be either patient or therapist");
   }
+
+  const hash = computeTermsHash({ sessionRate, franchiseRemaining, copayBps, platformFeeBps });
 
   const client = buildHederaClient();
   const topicId = await ensureTopicId(client);
@@ -75,14 +165,20 @@ async function confirmSession({ sessionId, role }) {
     sessionId,
     role,
     confirmedAt: new Date().toISOString(),
+    sessionRate: String(sessionRate),
+    franchiseRemaining: String(franchiseRemaining),
+    copayBps: Number(copayBps),
+    platformFeeBps: Number(platformFeeBps),
+    termsHash: hash,
   });
 
-  return submitResult;
+  return { ...submitResult, termsHash: hash };
 }
 
 /**
- * Reads current confirmation status for a session directly from the HCS mirror node,
- * without touching the contract. Used by the UI to enable/disable the finalize step.
+ * Reads current confirmation status AND the terms each party confirmed, directly
+ * from the HCS mirror node. The therapist view uses the patient's submitted
+ * franchise/co-pay from here to recompute a matching hash before confirming.
  */
 async function getConfirmationStatus({ sessionId }) {
   const topicId = process.env.HEDERA_TOPIC_ID;
@@ -92,15 +188,37 @@ async function getConfirmationStatus({ sessionId }) {
 
   const confirmations = await fetchSessionConfirmations(topicId, sessionId);
 
+  function summarize(confirmation) {
+    if (!confirmation) return null;
+    return {
+      sessionRate: confirmation.payload.sessionRate,
+      franchiseRemaining: confirmation.payload.franchiseRemaining,
+      copayBps: confirmation.payload.copayBps,
+      platformFeeBps: confirmation.payload.platformFeeBps,
+      termsHash: confirmation.payload.termsHash,
+      confirmedAt: confirmation.payload.confirmedAt,
+    };
+  }
+
+  const patient = summarize(confirmations.patientConfirmation);
+  const therapist = summarize(confirmations.therapistConfirmation);
+
   return {
     sessionId,
-    patientConfirmed: Boolean(confirmations.patientConfirmation),
-    therapistConfirmed: Boolean(confirmations.therapistConfirmation),
+    patientConfirmed: Boolean(patient),
+    therapistConfirmed: Boolean(therapist),
+    patient,
+    therapist,
+    termsMatch: Boolean(patient && therapist && patient.termsHash === therapist.termsHash),
   };
 }
 
 /**
- * Records both HCS confirmations on-chain and finalizes the invoice split.
+ * Step 4 — Records both HCS confirmations on-chain and finalizes the invoice.
+ * The contract itself re-derives the terms hash from these parameters and
+ * requires it to equal what both parties confirmed — this function also checks
+ * that off-chain first, so a mismatch fails fast with a clear message instead
+ * of spending gas on a transaction that will revert.
  */
 async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, copayBps, platformFeeBps }) {
   const topicId = process.env.HEDERA_TOPIC_ID;
@@ -113,15 +231,37 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     throw new Error("Cannot finalize invoice: both patient and therapist HCS confirmations are required");
   }
 
+  const patientHash = confirmations.patientConfirmation.payload.termsHash;
+  const therapistHash = confirmations.therapistConfirmation.payload.termsHash;
+
+  if (!patientHash || !therapistHash) {
+    throw new Error("Cannot finalize invoice: one or both confirmations are missing a terms hash (stale format?)");
+  }
+
+  if (patientHash !== therapistHash) {
+    throw new Error(
+      "Cannot finalize invoice: patient and therapist confirmed different terms (terms hash mismatch). " +
+        "Ask both parties to re-confirm using the same session rate, franchise remaining and co-pay."
+    );
+  }
+
+  const expectedHash = computeTermsHash({ sessionRate, franchiseRemaining, copayBps, platformFeeBps });
+  if (expectedHash !== patientHash) {
+    throw new Error(
+      "Cannot finalize invoice: the numbers submitted for finalization do not match what patient and " +
+        "therapist actually confirmed. Use the confirmed session rate, franchise remaining, co-pay and fee exactly."
+    );
+  }
+
   const contract = getContract();
   const sessionHash = toSessionHash(sessionId);
 
   const patientMessageId = `${topicId}@${confirmations.patientConfirmation.sequence_number}`;
   const therapistMessageId = `${topicId}@${confirmations.therapistConfirmation.sequence_number}`;
 
-  const recordPatientTx = await contract.recordHcsConfirmation(sessionHash, true, patientMessageId);
+  const recordPatientTx = await contract.recordHcsConfirmation(sessionHash, true, patientMessageId, patientHash);
   await recordPatientTx.wait();
-  const recordTherapistTx = await contract.recordHcsConfirmation(sessionHash, false, therapistMessageId);
+  const recordTherapistTx = await contract.recordHcsConfirmation(sessionHash, false, therapistMessageId, therapistHash);
   await recordTherapistTx.wait();
 
   const finalizeTx = await contract.finalizeInvoice(
@@ -129,7 +269,7 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     BigInt(sessionRate),
     BigInt(franchiseRemaining),
     Number(copayBps),
-    Number(platformFeeBps || 0)
+    Number(platformFeeBps)
   );
   const finalizeReceipt = await finalizeTx.wait();
 
@@ -139,6 +279,7 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     transactionHash: finalizeReceipt.hash,
     patientMessageId,
     therapistMessageId,
+    termsHash: patientHash,
   };
 }
 
@@ -167,12 +308,18 @@ async function viewInvoice({ sessionId }) {
     therapistPayout: invoice.therapistPayout.toString(),
     patientHcsMessageId: invoice.patientHcsMessageId,
     therapistHcsMessageId: invoice.therapistHcsMessageId,
+    patientTermsHash: invoice.patientTermsHash,
+    therapistTermsHash: invoice.therapistTermsHash,
   };
 }
 
 module.exports = {
   toSessionHash,
+  computeTermsHash,
+  previewSplit,
   createSession,
+  getSessionTerms,
+  getDefaultPlatformFeeBps,
   confirmSession,
   getConfirmationStatus,
   finalizeInvoice,

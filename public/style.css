@@ -59,7 +59,22 @@ body {
   font-size: 28px;
   margin: 0;
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
+
+.role-tag {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.role-tag--therapist { background: var(--clay-soft); color: var(--clay); }
+.role-tag--patient { background: #DCEAE4; color: var(--teal-deep); }
 
 .masthead__sub {
   margin: 2px 0 0;
@@ -295,6 +310,40 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .confirm-card__state.confirmed {
   color: var(--teal-deep);
   background: #DCEAE4;
+}
+
+/* ---------- Terms box (patient/therapist submitted terms display) ---------- */
+.terms-box {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 14px;
+}
+
+.terms-box--empty {
+  padding: 14px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-align: center;
+  border-style: dashed;
+}
+
+.terms-box__row {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+  font-size: 13.5px;
+}
+.terms-box__row:not(:last-child) { border-bottom: 1px solid var(--line); }
+.terms-box__row span { color: var(--ink-soft); }
+.terms-box__row strong { font-family: var(--mono); font-weight: 500; }
+
+.terms-box__hash {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  word-break: break-all;
+  padding: 8px 0 12px;
 }
 
 /* ---------- Invoice result ---------- */

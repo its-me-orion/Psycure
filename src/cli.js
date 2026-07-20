@@ -3,6 +3,9 @@ require("dotenv").config();
 
 const {
   createSession,
+  getSessionTerms,
+  getDefaultPlatformFeeBps,
+  previewSplit,
   confirmSession,
   finalizeInvoice,
   viewInvoice,
@@ -35,55 +38,89 @@ async function handleCreateSession(parsedArgs) {
     endTime: getRequiredArg(parsedArgs, "end"),
     patient: getRequiredArg(parsedArgs, "patient"),
     therapist: getRequiredArg(parsedArgs, "therapist"),
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
   });
 
-  console.log("Session created and logged on HCS:");
+  console.log("Session created (with rate) and logged on HCS:");
   console.log(result);
   if (!result.topicIdWasFromEnv) {
     console.log(`Remember to set HEDERA_TOPIC_ID=${result.topicId} in your .env`);
   }
 }
 
+async function handleViewTerms(parsedArgs) {
+  const terms = await getSessionTerms({ sessionId: getRequiredArg(parsedArgs, "session-id") });
+  console.log(terms);
+}
+
+async function handlePreview(parsedArgs) {
+  const defaultFeeBps = await getDefaultPlatformFeeBps();
+  const preview = previewSplit({
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
+    franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
+    copayBps: getRequiredArg(parsedArgs, "copay-bps"),
+    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
+  });
+  console.log({ platformFeeBpsUsed: parsedArgs["platform-fee-bps"] || defaultFeeBps, ...preview });
+}
+
 async function handleConfirmSession(parsedArgs) {
+  const defaultFeeBps = await getDefaultPlatformFeeBps();
   const result = await confirmSession({
     sessionId: getRequiredArg(parsedArgs, "session-id"),
     role: getRequiredArg(parsedArgs, "role"),
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
+    franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
+    copayBps: getRequiredArg(parsedArgs, "copay-bps"),
+    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
   });
 
-  console.log("Session confirmation submitted to HCS:");
+  console.log("Session confirmation (with terms hash) submitted to HCS:");
   console.log(result);
 }
 
 async function handleFinalizeInvoice(parsedArgs) {
+  const defaultFeeBps = await getDefaultPlatformFeeBps();
   const result = await finalizeInvoice({
     sessionId: getRequiredArg(parsedArgs, "session-id"),
     sessionRate: getRequiredArg(parsedArgs, "rate"),
     franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
     copayBps: getRequiredArg(parsedArgs, "copay-bps"),
-    platformFeeBps: parsedArgs["platform-fee-bps"] || "0",
+    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
   });
 
-  console.log("Invoice finalized on-chain:");
+  console.log("Invoice finalized on-chain (terms hash verified):");
   console.log(result);
 }
 
 async function handleViewInvoice(parsedArgs) {
-  const result = await viewInvoice({
-    sessionId: getRequiredArg(parsedArgs, "session-id"),
-  });
-
+  const result = await viewInvoice({ sessionId: getRequiredArg(parsedArgs, "session-id") });
   console.log(result);
 }
 
 function printUsage() {
-  console.log(`Usage:
-  npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob
-  npm run cli -- confirm-session --session-id S1 --role patient
-  npm run cli -- confirm-session --session-id S1 --role therapist
-  npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000 --platform-fee-bps 100
-  npm run cli -- view-invoice --session-id S1
+  console.log(`Usage (new flow — rate is set at creation, terms are confirmed with a matching hash):
 
-  Or run "npm run web" to use the browser-based frontend instead.`);
+  1) Therapist creates the session with the rate:
+     npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob --rate 18000
+
+  2) Patient looks up the session (to see the rate) and previews their split:
+     npm run cli -- view-terms --session-id S1
+     npm run cli -- preview --rate 18000 --franchise 10000 --copay-bps 1000
+
+  3) Patient confirms with their terms:
+     npm run cli -- confirm-session --session-id S1 --role patient --rate 18000 --franchise 10000 --copay-bps 1000
+
+  4) Therapist confirms with the SAME terms (must match exactly or finalize will reject):
+     npm run cli -- confirm-session --session-id S1 --role therapist --rate 18000 --franchise 10000 --copay-bps 1000
+
+  5) Finalize on-chain (contract re-checks the terms hash itself):
+     npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000
+
+  6) View the result:
+     npm run cli -- view-invoice --session-id S1
+
+  Or run "npm run web" for the browser UI (separate therapist/patient pages).`);
 }
 
 async function main() {
@@ -95,25 +132,12 @@ async function main() {
     return;
   }
 
-  if (command === "create-session") {
-    await handleCreateSession(args);
-    return;
-  }
-
-  if (command === "confirm-session") {
-    await handleConfirmSession(args);
-    return;
-  }
-
-  if (command === "finalize-invoice") {
-    await handleFinalizeInvoice(args);
-    return;
-  }
-
-  if (command === "view-invoice") {
-    await handleViewInvoice(args);
-    return;
-  }
+  if (command === "create-session") return handleCreateSession(args);
+  if (command === "view-terms") return handleViewTerms(args);
+  if (command === "preview") return handlePreview(args);
+  if (command === "confirm-session") return handleConfirmSession(args);
+  if (command === "finalize-invoice") return handleFinalizeInvoice(args);
+  if (command === "view-invoice") return handleViewInvoice(args);
 
   throw new Error(`Unknown command: ${command}`);
 }

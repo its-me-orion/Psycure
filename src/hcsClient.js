@@ -56,6 +56,32 @@ async function submitTopicMessage(client, topicId, payload) {
   };
 }
 
+async function fetchSessionCreated(topicId, sessionId) {
+  const mirrorBase = process.env.HEDERA_MIRROR_NODE_URL || DEFAULT_MIRROR_NODE;
+  const url = `${mirrorBase}/api/v1/topics/${topicId}/messages?order=desc&limit=100`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch topic messages (${response.status})`);
+  }
+
+  const data = await response.json();
+  const messages = (data.messages || [])
+    .map((message) => {
+      const decoded = Buffer.from(message.message, "base64").toString("utf8");
+      try {
+        return { sequence_number: message.sequence_number, payload: JSON.parse(decoded) };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  return messages.find(
+    (msg) => msg.payload?.type === "SESSION_CREATED" && msg.payload?.sessionId === sessionId
+  );
+}
+
 async function fetchSessionConfirmations(topicId, sessionId) {
   const mirrorBase = process.env.HEDERA_MIRROR_NODE_URL || DEFAULT_MIRROR_NODE;
   const url = `${mirrorBase}/api/v1/topics/${topicId}/messages?order=desc&limit=100`;
@@ -105,5 +131,6 @@ module.exports = {
   buildHederaClient,
   ensureTopicId,
   submitTopicMessage,
+  fetchSessionCreated,
   fetchSessionConfirmations,
 };
