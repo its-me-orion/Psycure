@@ -4,11 +4,12 @@ Proof-of-concept Hedera dApp for transparent psychotherapy invoicing between pat
 
 ## What this PoC includes
 
-1. **Appointment logging via Hedera Consensus Service (HCS)**
+1. **Appointment + terms commitment logging via Hedera Consensus Service (HCS)**
    - `src/cli.js` writes immutable `SESSION_CREATED` and `SESSION_CONFIRMED` messages to a shared HCS topic.
-   - Patient and therapist each submit a confirmation for the same `sessionId`.
+   - Patient and therapist each submit a confirmation for the same `sessionId` and `termsHash`.
 2. **Invoice smart contract (Hedera EVM compatible)**
    - `contracts/PsycureInvoice.sol` only finalizes an invoice after both HCS confirmations are recorded.
+   - Finalization recomputes and re-verifies `termsHash` on-chain before writing payout values.
    - Calculates patient/insurer split from:
      - session rate
      - remaining franchise
@@ -67,17 +68,19 @@ npm run cli -- create-session \
   --date 2026-07-17 \
   --start 09:00 \
   --end 09:50 \
+  --rate 18000 \
   --patient patient-alias \
   --therapist therapist-alias
 ```
 
 If no `HEDERA_TOPIC_ID` is set, this command creates one and prints it. Add it to `.env`.
 
-### 2) Submit both confirmations
+### 2) Submit both confirmations with identical terms
 
 ```bash
-npm run cli -- confirm-session --session-id S1 --role patient
-npm run cli -- confirm-session --session-id S1 --role therapist
+npm run cli -- confirm-session --session-id S1 --role patient --rate 18000 --franchise 10000 --copay-bps 1000
+# Copy the `termsHash` from the patient confirmation payload:
+npm run cli -- confirm-session --session-id S1 --role therapist --terms-hash <termsHash>
 ```
 
 ### 3) Finalize invoice
@@ -101,3 +104,4 @@ npm run cli -- view-invoice --session-id S1
 
 - This is intentionally a **course-project PoC** and not production-grade.
 - All money values are treated as integer minor units (e.g., cents/rappen).
+- `termsHash = keccak256(abi.encode(sessionId, sessionRate, franchiseRemaining, copayBps))`.

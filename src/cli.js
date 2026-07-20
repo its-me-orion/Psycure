@@ -10,9 +10,9 @@ const {
 } = require("./hcsClient");
 
 const INVOICE_ABI = [
-  "function recordHcsConfirmation(bytes32 sessionId, bool isPatient, string hcsMessageId) external",
+  "function recordHcsConfirmation(bytes32 sessionId, bool isPatient, string hcsMessageId, bytes32 termsHash) external",
   "function finalizeInvoice(bytes32 sessionId, uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external",
-  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId))",
+  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,bytes32 patientTermsHash,bytes32 therapistTermsHash,bytes32 finalizedTermsHash,string patientHcsMessageId,string therapistHcsMessageId))",
 ];
 
 function parseArgs(args) {
@@ -55,6 +55,14 @@ function toSessionHash(sessionId) {
   return ethers.keccak256(ethers.toUtf8Bytes(sessionId));
 }
 
+function toTermsHash(sessionHash, sessionRate, franchiseRemaining, copayBps) {
+  const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+    ["bytes32", "uint256", "uint256", "uint16"],
+    [sessionHash, sessionRate, franchiseRemaining, copayBps]
+  );
+  return ethers.keccak256(encoded);
+}
+
 async function handleCreateSession(parsedArgs) {
   const sessionId = getRequiredArg(parsedArgs, "session-id");
   const date = getRequiredArg(parsedArgs, "date");
@@ -62,6 +70,7 @@ async function handleCreateSession(parsedArgs) {
   const endTime = getRequiredArg(parsedArgs, "end");
   const patient = getRequiredArg(parsedArgs, "patient");
   const therapist = getRequiredArg(parsedArgs, "therapist");
+  const sessionRate = getRequiredArg(parsedArgs, "rate");
 
   const client = buildHederaClient();
   const topicId = await ensureTopicId(client);
@@ -72,6 +81,7 @@ async function handleCreateSession(parsedArgs) {
     date,
     startTime,
     endTime,
+    sessionRate,
     patient,
     therapist,
   });
@@ -93,11 +103,29 @@ async function handleConfirmSession(parsedArgs) {
 
   const client = buildHederaClient();
   const topicId = await ensureTopicId(client);
+  const sessionHash = toSessionHash(sessionId);
+  const providedTermsHash = parsedArgs["terms-hash"];
+
+  let termsHash = providedTermsHash;
+  let sessionRate;
+  let franchiseRemaining;
+  let copayBps;
+
+  if (!termsHash) {
+    sessionRate = BigInt(getRequiredArg(parsedArgs, "rate"));
+    franchiseRemaining = BigInt(getRequiredArg(parsedArgs, "franchise"));
+    copayBps = Number(getRequiredArg(parsedArgs, "copay-bps"));
+    termsHash = toTermsHash(sessionHash, sessionRate, franchiseRemaining, copayBps);
+  }
 
   const submitResult = await submitTopicMessage(client, topicId, {
     type: "SESSION_CONFIRMED",
     sessionId,
     role,
+    termsHash,
+    sessionRate: sessionRate?.toString(),
+    franchiseRemaining: franchiseRemaining?.toString(),
+    copayBps,
     confirmedAt: new Date().toISOString(),
   });
 
@@ -124,13 +152,26 @@ async function handleFinalizeInvoice(parsedArgs) {
 
   const contract = getContract();
   const sessionHash = toSessionHash(sessionId);
+  const expectedTermsHash = toTermsHash(sessionHash, sessionRate, franchiseRemaining, copayBps);
 
   const patientMessageId = `${topicId}@${confirmations.patientConfirmation.sequence_number}`;
   const therapistMessageId = `${topicId}@${confirmations.therapistConfirmation.sequence_number}`;
+  const patientTermsHash = confirmations.patientConfirmation.payload?.termsHash;
+  const therapistTermsHash = confirmations.therapistConfirmation.payload?.termsHash;
 
-  const recordPatientTx = await contract.recordHcsConfirmation(sessionHash, true, patientMessageId);
+  if (!patientTermsHash || !therapistTermsHash) {
+    throw new Error("Cannot finalize invoice: both confirmations must include termsHash");
+  }
+  if (patientTermsHash !== therapistTermsHash) {
+    throw new Error("Cannot finalize invoice: patient and therapist termsHash differ");
+  }
+  if (patientTermsHash !== expectedTermsHash) {
+    throw new Error("Cannot finalize invoice: finalized values do not match confirmed termsHash");
+  }
+
+  const recordPatientTx = await contract.recordHcsConfirmation(sessionHash, true, patientMessageId, patientTermsHash);
   await recordPatientTx.wait();
-  const recordTherapistTx = await contract.recordHcsConfirmation(sessionHash, false, therapistMessageId);
+  const recordTherapistTx = await contract.recordHcsConfirmation(sessionHash, false, therapistMessageId, therapistTermsHash);
   await recordTherapistTx.wait();
 
   const finalizeTx = await contract.finalizeInvoice(
@@ -149,6 +190,7 @@ async function handleFinalizeInvoice(parsedArgs) {
     transactionHash: finalizeReceipt.hash,
     patientMessageId,
     therapistMessageId,
+    termsHash: expectedTermsHash,
   });
 }
 
@@ -173,6 +215,9 @@ async function handleViewInvoice(parsedArgs) {
     insurerAmount: invoice.insurerAmount.toString(),
     platformFeeAmount: invoice.platformFeeAmount.toString(),
     therapistPayout: invoice.therapistPayout.toString(),
+    patientTermsHash: invoice.patientTermsHash,
+    therapistTermsHash: invoice.therapistTermsHash,
+    finalizedTermsHash: invoice.finalizedTermsHash,
     patientHcsMessageId: invoice.patientHcsMessageId,
     therapistHcsMessageId: invoice.therapistHcsMessageId,
   });
@@ -180,9 +225,9 @@ async function handleViewInvoice(parsedArgs) {
 
 function printUsage() {
   console.log(`Usage:
-  npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob
-  npm run cli -- confirm-session --session-id S1 --role patient
-  npm run cli -- confirm-session --session-id S1 --role therapist
+  npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --rate 18000 --patient alice --therapist bob
+  npm run cli -- confirm-session --session-id S1 --role patient --rate 18000 --franchise 10000 --copay-bps 1000
+  npm run cli -- confirm-session --session-id S1 --role therapist --terms-hash <hash-from-patient>
   npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000 --platform-fee-bps 100
   npm run cli -- view-invoice --session-id S1`);
 }
