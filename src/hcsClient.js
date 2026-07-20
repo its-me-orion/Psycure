@@ -18,7 +18,7 @@ function getEnv(name) {
 
 function buildHederaClient() {
   const operatorId = getEnv("OPERATOR_ACCOUNT_ID");
-  const operatorKey = PrivateKey.fromStringED25519(getEnv("OPERATOR_PRIVATE_KEY"));
+  const operatorKey = PrivateKey.fromStringECDSA(getEnv("OPERATOR_PRIVATE_KEY"));
   const client = Client.forTestnet();
   client.setOperator(operatorId, operatorKey);
   return client;

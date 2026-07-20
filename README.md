@@ -16,15 +16,16 @@ Proof-of-concept Hedera dApp for transparent psychotherapy invoicing between pat
    - Emits `InvoiceFinalized` when finalized.
 3. **Platform micro-fee model**
    - Contract applies a platform fee (basis points) on each finalized invoice.
-4. **CLI workflow**
-   - Create session
-   - Patient + therapist confirm
-   - Finalize invoice
-   - View invoice details
+4. **Two ways to drive the workflow**
+   - `src/cli.js` — command line
+   - `src/server.js` + `public/` — a small browser UI (recommended for demos/presentation)
+
+   Both call the same shared logic in `src/psycureService.js`, so they always behave identically.
 
 ## Tech stack
 
 - Node.js + JavaScript
+- Express (web UI backend)
 - Hardhat (compile/test/deploy)
 - Solidity (`0.8.24`)
 - Hedera JS SDK (`@hashgraph/sdk`)
@@ -97,7 +98,28 @@ npm run cli -- finalize-invoice \
 npm run cli -- view-invoice --session-id S1
 ```
 
+## Web UI usage (recommended for the presentation)
+
+Once `.env` is filled in and the contract is deployed (see Setup/Deploy above):
+
+```bash
+npm run web
+```
+
+Then open `http://localhost:3000`. The page walks through the same four steps as the
+CLI — create session, confirm as patient/therapist, finalize, view invoice — and shows
+a live "ledger trail" of every HCS message and on-chain transaction as it happens, so
+you can narrate the immutability story directly from the browser instead of a terminal.
+
+The web UI reuses the exact same `.env` variables as the CLI (`OPERATOR_ACCOUNT_ID`,
+`OPERATOR_PRIVATE_KEY`, `EVM_PRIVATE_KEY`, `CONTRACT_ADDRESS`, `HEDERA_TOPIC_ID`, etc.) —
+no separate configuration needed.
+
 ## Notes
 
 - This is intentionally a **course-project PoC** and not production-grade.
 - All money values are treated as integer minor units (e.g., cents/rappen).
+- The web UI and CLI both act through a single backend-held operator/EVM key (see the
+  "limitations" discussion in the report) — patients and therapists write to HCS
+  through this shared server rather than signing with their own keys, which is a
+  simplification worth naming explicitly in your report's critical overview.
