@@ -1,0 +1,77 @@
+{
+  "sessionId": "session-123",
+  "createdAt": "2026-07-21T14:42:19.590Z",
+  "participants": {
+    "patientId": "patient-1",
+    "therapistId": "therapist-1",
+    "patientAlias": "Patient",
+    "therapistAlias": "Therapist"
+  },
+  "messages": [
+    {
+      "id": "1784645111231-zppurb",
+      "senderRole": "therapist",
+      "senderId": "therapist-1",
+      "createdAt": "2026-07-21T14:45:11.232Z",
+      "contentPayload": {
+        "iv": "52c9a7bd135bf51080bf575c37840901",
+        "encryptedContent": "ff44a33439eeacfc51b8f2ef5942a2bd"
+      },
+      "content": "hello"
+    },
+    {
+      "id": "1784645128748-50rtxl",
+      "senderRole": "therapist",
+      "senderId": "therapist-1",
+      "createdAt": "2026-07-21T14:45:28.748Z",
+      "contentPayload": {
+        "iv": "8dd0aaf717725060f10ae2dfb4c80b82",
+        "encryptedContent": "87934a0a0a3e3a3d729d370282dfba42"
+      },
+      "content": "hello"
+    },
+    {
+      "id": "1784645201820-bb6bxw",
+      "senderRole": "therapist",
+      "senderId": "therapist-1",
+      "createdAt": "2026-07-21T14:46:41.820Z",
+      "contentPayload": {
+        "iv": "5bce5a8d8ba014921d5ea570206979f5",
+        "encryptedContent": "359a05354f050744830c159b172a6790"
+      },
+      "content": "hello"
+    },
+    {
+      "id": "1784645212946-4weodh",
+      "senderRole": "therapist",
+      "senderId": "therapist-1",
+      "createdAt": "2026-07-21T14:46:52.946Z",
+      "contentPayload": {
+        "iv": "b04faa4d3664c718d231000ce5b9f37e",
+        "encryptedContent": "fe7d97767eb7920b9f562998dd44e0e8"
+      },
+      "content": "hello"
+    },
+    {
+      "id": "1784645319522-qy7gk7",
+      "senderRole": "patient",
+      "senderId": "patient-1",
+      "createdAt": "2026-07-21T14:48:39.522Z",
+      "contentPayload": {
+        "iv": "debc63c02e3b554fe1d8d207d5544e87",
+        "encryptedContent": "eca57cc25bf77637c1ad8ea5c198aaab"
+      },
+      "content": "hello"
+    },
+    {
+      "id": "1784646077571-yle28o",
+      "senderRole": "therapist",
+      "senderId": "therapist-1",
+      "createdAt": "2026-07-21T15:01:17.571Z",
+      "contentPayload": {
+        "iv": "523f6b5d14a32d0e1aa069c834724a4b",
+        "encryptedContent": "1f48a55baad1826180adb6e47477afa3"
+      }
+    }
+  ]
+}
