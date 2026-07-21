@@ -12,7 +12,7 @@
   .landing__mark { color: #1F4A41; margin-bottom: 18px; }
   .landing h1 { font-family: "Fraunces", serif; font-weight: 600; font-size: 30px; margin: 0 0 10px; }
   .landing p { color: #55655F; margin: 0 0 40px; }
-  .landing__choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .landing__choices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
   .landing__card {
     display: block; text-decoration: none; color: inherit;
     background: #FBFCFA; border: 1px solid #D7DED3; border-radius: 12px;
@@ -21,7 +21,7 @@
   .landing__card:hover { border-color: #2F6F62; transform: translateY(-2px); }
   .landing__card h2 { font-family: "Fraunces", serif; font-size: 18px; margin: 10px 0 6px; }
   .landing__card p { font-size: 13px; margin: 0; }
-  @media (max-width: 560px) { .landing__choices { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .landing__choices { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -41,7 +41,11 @@
       </a>
       <a class="landing__card" href="patient.html">
         <h2>Patient</h2>
-        <p>Look up a session, enter your franchise &amp; co-pay, preview your cost, and confirm.</p>
+        <p>Look up a session, wait for your insurer's terms, preview your cost, and confirm.</p>
+      </a>
+      <a class="landing__card" href="insurer.html">
+        <h2>Insurer</h2>
+        <p>Look up a session, publish the franchise remaining &amp; co-pay terms, and confirm.</p>
       </a>
     </div>
   </div>

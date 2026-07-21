@@ -38,6 +38,7 @@ async function handleCreateSession(parsedArgs) {
     endTime: getRequiredArg(parsedArgs, "end"),
     patient: getRequiredArg(parsedArgs, "patient"),
     therapist: getRequiredArg(parsedArgs, "therapist"),
+    insurer: getRequiredArg(parsedArgs, "insurer"),
     sessionRate: getRequiredArg(parsedArgs, "rate"),
   });
 
@@ -99,16 +100,18 @@ async function handleViewInvoice(parsedArgs) {
 }
 
 function printUsage() {
-  console.log(`Usage (new flow — rate is set at creation, terms are confirmed with a matching hash):
+  console.log(`Usage (three-party flow — the insurer is the authoritative source of franchise/co-pay;
+patient and therapist mirror the insurer's terms rather than typing their own):
 
   1) Therapist creates the session with the rate:
-     npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob --rate 18000
+     npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob --insurer acme-insurance --rate 18000
 
-  2) Patient looks up the session (to see the rate) and previews their split:
+  2) Insurer looks up the session (to see the rate) and publishes the authoritative terms:
      npm run cli -- view-terms --session-id S1
      npm run cli -- preview --rate 18000 --franchise 10000 --copay-bps 1000
+     npm run cli -- confirm-session --session-id S1 --role insurer --rate 18000 --franchise 10000 --copay-bps 1000
 
-  3) Patient confirms with their terms:
+  3) Patient confirms with the SAME terms (fails until the insurer has confirmed):
      npm run cli -- confirm-session --session-id S1 --role patient --rate 18000 --franchise 10000 --copay-bps 1000
 
   4) Therapist confirms with the SAME terms (must match exactly or finalize will reject):
@@ -120,7 +123,7 @@ function printUsage() {
   6) View the result:
      npm run cli -- view-invoice --session-id S1
 
-  Or run "npm run web" for the browser UI (separate therapist/patient pages).`);
+  Or run "npm run web" for the browser UI (separate insurer/patient/therapist pages).`);
 }
 
 async function main() {

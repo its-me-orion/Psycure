@@ -42,8 +42,8 @@ app.get(
 app.post(
   "/api/sessions",
   asyncRoute(async (req, res) => {
-    const { sessionId, date, startTime, endTime, patient, therapist, sessionRate } = req.body;
-    const result = await createSession({ sessionId, date, startTime, endTime, patient, therapist, sessionRate });
+    const { sessionId, date, startTime, endTime, patient, therapist, insurer, sessionRate } = req.body;
+    const result = await createSession({ sessionId, date, startTime, endTime, patient, therapist, insurer, sessionRate });
     res.json(result);
   })
 );

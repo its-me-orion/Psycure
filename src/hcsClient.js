@@ -121,9 +121,17 @@ async function fetchSessionConfirmations(topicId, sessionId) {
       msg.payload?.role === "therapist"
   );
 
+  const insurerConfirmation = messages.find(
+    (msg) =>
+      msg.payload?.type === "SESSION_CONFIRMED" &&
+      msg.payload?.sessionId === sessionId &&
+      msg.payload?.role === "insurer"
+  );
+
   return {
     patientConfirmation,
     therapistConfirmation,
+    insurerConfirmation,
   };
 }
 

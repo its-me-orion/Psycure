@@ -18,6 +18,22 @@ function currentSessionId() {
   return el("sessionId").value.trim();
 }
 
+// Wraps a reload-icon click handler with a disabled/spinning state so repeated
+// clicks don't pile up requests and the user gets visual feedback that
+// something happened.
+function withSpin(btn, fn) {
+  return async () => {
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      await fn();
+    } finally {
+      btn.classList.remove("spinning");
+      btn.disabled = false;
+    }
+  };
+}
+
 function addLedgerEntry({ title, meta, status = "ok" }) {
   const container = el("ledgerEntries");
   const empty = container.querySelector(".ledger__empty");

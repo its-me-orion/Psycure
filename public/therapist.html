@@ -55,6 +55,7 @@
             <div class="field"><label>End</label><input id="f-end" type="time" /></div>
             <div class="field"><label>Patient alias</label><input id="f-patient" type="text" placeholder="patient-alias" /></div>
             <div class="field"><label>Therapist alias</label><input id="f-therapist" type="text" placeholder="therapist-alias" /></div>
+            <div class="field"><label>Insurer alias</label><input id="f-insurer" type="text" placeholder="insurer-alias" /></div>
             <div class="field"><label>Session rate (CHF)</label><input id="f-rate" type="number" step="0.05" min="0" value="180.00" /></div>
           </div>
           <button id="createBtn" class="primary-btn">Create session &amp; set rate</button>
@@ -66,13 +67,16 @@
         <div class="step__head">
           <span class="step__num">02</span>
           <div>
-            <h2>Review patient's terms &amp; confirm</h2>
-            <p>Wait for the patient to submit their franchise/co-pay, then confirm the <em>same</em> terms — this binds your confirmation to a matching hash.</p>
+            <h2>Review insurer's terms &amp; confirm</h2>
+            <p>Wait for the insurer to publish the franchise/co-pay terms, then confirm the <em>same</em> terms — this binds your confirmation to a matching hash.</p>
           </div>
+          <button id="reloadInsurerTermsBtn" class="icon-btn" type="button" title="Check again for insurer's terms" aria-label="Check again for insurer's terms">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
         </div>
         <div class="step__body">
-          <button id="loadPatientBtn" class="secondary-btn">Load patient's submission</button>
-          <div id="patientTermsBox" class="terms-box terms-box--empty">No patient submission loaded yet.</div>
+          <button id="loadPatientBtn" class="secondary-btn">Load insurer's terms</button>
+          <div id="patientTermsBox" class="terms-box terms-box--empty">No insurer terms loaded yet.</div>
           <button id="confirmBtn" class="primary-btn" disabled>Confirm as therapist (matching terms)</button>
         </div>
       </article>
@@ -85,6 +89,9 @@
             <h2>Finalize invoice</h2>
             <p>Records both HCS confirmations on-chain. The contract re-checks the terms hash itself before settling.</p>
           </div>
+          <button id="reloadFinalizeStatusBtn" class="icon-btn" type="button" title="Refresh confirmation status" aria-label="Refresh confirmation status">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
         </div>
         <div class="step__body">
           <button id="finalizeBtn" class="primary-btn" disabled>Finalize on-chain</button>
@@ -107,7 +114,8 @@
   </main>
 
   <footer class="foot">
-    Proof-of-concept for DDiB '26 (UZH) — not for real patient data. <a href="patient.html">Switch to patient view →</a>
+    Proof-of-concept for DDiB '26 (UZH) — not for real patient data.
+    <a href="patient.html">Switch to patient view →</a> · <a href="insurer.html">Switch to insurer view →</a>
   </footer>
 
 </div>

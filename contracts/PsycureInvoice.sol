@@ -2,17 +2,24 @@
 pragma solidity ^0.8.24;
 
 /// @title PsycureInvoice
-/// @notice Records patient/therapist HCS confirmations for a session and finalizes
-///         an invoice split (franchise + co-pay, Swiss KVG-style) only once both
-///         parties have confirmed the *exact same* terms. The terms each party
-///         confirmed are committed as a hash at confirmation time, and finalize()
-///         re-derives that hash from its own parameters and requires an exact
-///         match — so the platform (owner) cannot finalize different numbers than
-///         what patient and therapist actually agreed to.
+/// @notice Records patient/therapist/insurer HCS confirmations for a session and
+///         finalizes an invoice split (franchise + co-pay, Swiss KVG-style) only
+///         once all three parties have confirmed the *exact same* terms. The
+///         terms each party confirmed are committed as a hash at confirmation
+///         time, and finalize() re-derives that hash from its own parameters and
+///         requires an exact match — so the platform (owner) cannot finalize
+///         different numbers than what patient, therapist and insurer actually
+///         agreed to.
 contract PsycureInvoice {
+    // Role codes used by recordHcsConfirmation / HcsConfirmationRecorded.
+    uint8 public constant ROLE_PATIENT = 0;
+    uint8 public constant ROLE_THERAPIST = 1;
+    uint8 public constant ROLE_INSURER = 2;
+
     struct SessionInvoice {
         bool patientConfirmed;
         bool therapistConfirmed;
+        bool insurerConfirmed;
         bool finalized;
         uint256 sessionRate;
         uint256 franchiseRemaining;
@@ -24,8 +31,10 @@ contract PsycureInvoice {
         uint256 therapistPayout;
         string patientHcsMessageId;
         string therapistHcsMessageId;
+        string insurerHcsMessageId;
         bytes32 patientTermsHash;
         bytes32 therapistTermsHash;
+        bytes32 insurerTermsHash;
     }
 
     mapping(bytes32 => SessionInvoice) private invoices;
@@ -35,7 +44,7 @@ contract PsycureInvoice {
 
     event HcsConfirmationRecorded(
         bytes32 indexed sessionId,
-        bool indexed isPatient,
+        uint8 indexed role,
         string hcsMessageId,
         bytes32 termsHash
     );
@@ -75,28 +84,34 @@ contract PsycureInvoice {
         return keccak256(abi.encodePacked(sessionRate, franchiseRemaining, copayBps, platformFeeBps));
     }
 
+    /// @param role One of ROLE_PATIENT / ROLE_THERAPIST / ROLE_INSURER.
     /// @param termsHash Must equal computeTermsHash(...) of the terms this party is confirming.
     function recordHcsConfirmation(
         bytes32 sessionId,
-        bool isPatient,
+        uint8 role,
         string calldata hcsMessageId,
         bytes32 termsHash
     ) external onlyOwner {
         require(termsHash != bytes32(0), "Terms hash required");
+        require(role <= ROLE_INSURER, "Invalid role");
 
         SessionInvoice storage invoice = invoices[sessionId];
         require(!invoice.finalized, "Already finalized");
 
-        if (isPatient) {
+        if (role == ROLE_PATIENT) {
             invoice.patientConfirmed = true;
             invoice.patientHcsMessageId = hcsMessageId;
             invoice.patientTermsHash = termsHash;
-        } else {
+        } else if (role == ROLE_THERAPIST) {
             invoice.therapistConfirmed = true;
             invoice.therapistHcsMessageId = hcsMessageId;
             invoice.therapistTermsHash = termsHash;
+        } else {
+            invoice.insurerConfirmed = true;
+            invoice.insurerHcsMessageId = hcsMessageId;
+            invoice.insurerTermsHash = termsHash;
         }
-        emit HcsConfirmationRecorded(sessionId, isPatient, hcsMessageId, termsHash);
+        emit HcsConfirmationRecorded(sessionId, role, hcsMessageId, termsHash);
     }
 
     function canFinalize(bytes32 sessionId) external view returns (bool) {
@@ -104,8 +119,10 @@ contract PsycureInvoice {
         return
             invoice.patientConfirmed &&
             invoice.therapistConfirmed &&
+            invoice.insurerConfirmed &&
             !invoice.finalized &&
-            invoice.patientTermsHash == invoice.therapistTermsHash;
+            invoice.patientTermsHash == invoice.therapistTermsHash &&
+            invoice.patientTermsHash == invoice.insurerTermsHash;
     }
 
     function finalizeInvoice(
@@ -116,13 +133,17 @@ contract PsycureInvoice {
         uint16 platformFeeBps
     ) external onlyOwner {
         SessionInvoice storage invoice = invoices[sessionId];
-        require(invoice.patientConfirmed && invoice.therapistConfirmed, "Need both confirmations");
+        require(
+            invoice.patientConfirmed && invoice.therapistConfirmed && invoice.insurerConfirmed,
+            "Need all three confirmations"
+        );
         require(!invoice.finalized, "Already finalized");
         require(copayBps <= 10_000, "Copay too high");
         require(platformFeeBps <= 10_000, "Fee too high");
 
-        // Both parties must have committed to the identical terms hash ...
+        // All three parties must have committed to the identical terms hash ...
         require(invoice.patientTermsHash == invoice.therapistTermsHash, "Terms mismatch between parties");
+        require(invoice.patientTermsHash == invoice.insurerTermsHash, "Terms mismatch between parties");
 
         // ... and it must equal the hash of the numbers actually being finalized here.
         // This is what prevents the operator from finalizing different numbers than

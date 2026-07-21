@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Psycure — Patient</title>
+<title>Psycure — Insurer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css" />
@@ -20,8 +20,8 @@
       </svg>
     </a>
     <div>
-      <h1>Psycure <span class="role-tag role-tag--patient">Patient</span></h1>
-      <p class="masthead__sub">Look up your session, wait for your insurer's terms, preview your cost, then confirm.</p>
+      <h1>Psycure <span class="role-tag role-tag--insurer">Insurer</span></h1>
+      <p class="masthead__sub">Look up a session, publish the authoritative franchise &amp; co-pay terms, then confirm.</p>
     </div>
     <div class="masthead__net">
       <span class="dot" id="netDot"></span>
@@ -34,7 +34,7 @@
     <section class="flow">
 
       <div class="session-picker">
-        <label for="sessionId">Session ID (from your therapist)</label>
+        <label for="sessionId">Session ID (from the therapist)</label>
         <input id="sessionId" type="text" value="S1" spellcheck="false" />
         <button id="loadSessionBtn" class="ghost-btn">Load session</button>
       </div>
@@ -45,7 +45,7 @@
           <span class="step__num">01</span>
           <div>
             <h2>Session details</h2>
-            <p>Read directly from HCS — this is the rate your therapist set when creating the session.</p>
+            <p>Read directly from HCS — this is the rate the therapist set when creating the session.</p>
           </div>
         </div>
         <div class="step__body">
@@ -58,16 +58,17 @@
         <div class="step__head">
           <span class="step__num">02</span>
           <div>
-            <h2>Your insurance terms</h2>
-            <p>Your insurer publishes your remaining franchise and co-pay rate — you don't need to remember or enter these yourself.</p>
+            <h2>Publish the policy terms</h2>
+            <p>Enter this patient's remaining franchise and co-pay rate. These are the authoritative numbers — the patient and therapist will confirm against them, not their own figures.</p>
           </div>
-          <button id="reloadInsurerTermsBtn" class="icon-btn" type="button" title="Check again for insurer's terms" aria-label="Check again for insurer's terms">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-          </button>
         </div>
         <div class="step__body">
-          <div id="insurerTermsBox" class="terms-box terms-box--empty">Load a session to check for your insurer's terms.</div>
-          <div id="previewBox" class="invoice-result invoice-result--empty">Your cost breakdown will appear here once your insurer has published terms.</div>
+          <div class="field-grid">
+            <div class="field"><label>Franchise remaining (CHF)</label><input id="f-franchise" type="number" step="0.05" min="0" value="100.00" /></div>
+            <div class="field"><label>Co-pay (%)</label><input id="f-copay" type="number" step="0.1" min="0" max="100" value="10" /></div>
+          </div>
+          <button id="previewBtn" class="secondary-btn">Preview split</button>
+          <div id="previewBox" class="invoice-result invoice-result--empty">Enter the policy terms and preview to see a breakdown.</div>
         </div>
       </article>
 
@@ -77,14 +78,14 @@
           <span class="step__num">03</span>
           <div>
             <h2>Confirm</h2>
-            <p>This submits your confirmation — mirroring your insurer's published terms — to HCS. Your therapist must confirm the same terms before the invoice can be finalized.</p>
+            <p>This publishes your confirmation — with these exact terms — to HCS. The patient and therapist can only confirm once this step is done.</p>
           </div>
           <button id="reloadStatusBtn" class="icon-btn" type="button" title="Refresh confirmation status" aria-label="Refresh confirmation status">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
           </button>
         </div>
         <div class="step__body">
-          <button id="confirmBtn" class="primary-btn" disabled>Confirm as patient</button>
+          <button id="confirmBtn" class="primary-btn" disabled>Confirm as insurer</button>
           <div id="statusBox" class="terms-box terms-box--empty">Not confirmed yet.</div>
         </div>
       </article>
@@ -95,7 +96,7 @@
           <span class="step__num">04</span>
           <div>
             <h2>Invoice status</h2>
-            <p>Once your therapist finalizes, the result appears here.</p>
+            <p>Once the therapist finalizes, the result appears here.</p>
           </div>
         </div>
         <div class="step__body">
@@ -109,7 +110,7 @@
     </section>
 
     <aside class="ledger">
-      <h3>Ledger trail&nbsp;&nbsp;<span class="role-tag role-tag--patient">Patient</span></h3>
+      <h3>Ledger trail&nbsp;&nbsp;<span class="role-tag role-tag--insurer">Insurer</span></h3>
       <p class="ledger__hint">Every write shown here actually lands on Hedera testnet.</p>
       <div id="ledgerEntries" class="ledger__entries">
         <div class="ledger__empty">No activity yet — load a session to begin.</div>
@@ -120,12 +121,12 @@
 
   <footer class="foot">
     Proof-of-concept for DDiB '26 (UZH) — not for real patient data.
-    <a href="insurer.html">Switch to insurer view →</a> · <a href="therapist.html">Switch to therapist view →</a>
+    <a href="patient.html">Switch to patient view →</a> · <a href="therapist.html">Switch to therapist view →</a>
   </footer>
 
 </div>
 
 <script src="shared.js"></script>
-<script src="patient.js"></script>
+<script src="insurer.js"></script>
 </body>
 </html>

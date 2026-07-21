@@ -1,4 +1,4 @@
-let loadedPatientTerms = null; // { sessionRate, franchiseRemaining, copayBps, platformFeeBps, termsHash } in rappen/bps
+let loadedInsurerTerms = null; // { sessionRate, franchiseRemaining, copayBps, platformFeeBps, termsHash } in rappen/bps
 
 // ---------- Step 1: create session ----------
 el("createBtn").addEventListener("click", async () => {
@@ -14,6 +14,7 @@ el("createBtn").addEventListener("click", async () => {
       endTime: el("f-end").value,
       patient: el("f-patient").value,
       therapist: el("f-therapist").value,
+      insurer: el("f-insurer").value,
       sessionRate: chfToRappen(el("f-rate").value),
     });
     pendingEntry.remove();
@@ -29,43 +30,46 @@ el("createBtn").addEventListener("click", async () => {
   }
 });
 
-// ---------- Step 2: load patient's submission ----------
-el("loadPatientBtn").addEventListener("click", async () => {
+// ---------- Step 2: load insurer's published terms ----------
+async function loadInsurerTerms() {
   const sessionId = currentSessionId();
   const box = el("patientTermsBox");
   try {
     const status = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/confirmations`);
-    if (!status.patientConfirmed) {
+    if (!status.insurerConfirmed) {
       box.className = "terms-box terms-box--empty";
-      box.textContent = "Patient has not submitted their terms yet.";
+      box.textContent = "Insurer has not published terms yet.";
       el("confirmBtn").disabled = true;
       return;
     }
 
-    loadedPatientTerms = status.patient;
+    loadedInsurerTerms = status.insurer;
     box.className = "terms-box";
     box.innerHTML = `
-      <div class="terms-box__row"><span>Session rate</span><strong>CHF ${rappenToChf(loadedPatientTerms.sessionRate)}</strong></div>
-      <div class="terms-box__row"><span>Franchise remaining</span><strong>CHF ${rappenToChf(loadedPatientTerms.franchiseRemaining)}</strong></div>
-      <div class="terms-box__row"><span>Co-pay</span><strong>${bpsToPercent(loadedPatientTerms.copayBps)}%</strong></div>
-      <div class="terms-box__row"><span>Platform fee</span><strong>${bpsToPercent(loadedPatientTerms.platformFeeBps)}%</strong></div>
-      <div class="terms-box__hash">terms hash: ${loadedPatientTerms.termsHash}</div>
+      <div class="terms-box__row"><span>Session rate</span><strong>CHF ${rappenToChf(loadedInsurerTerms.sessionRate)}</strong></div>
+      <div class="terms-box__row"><span>Franchise remaining</span><strong>CHF ${rappenToChf(loadedInsurerTerms.franchiseRemaining)}</strong></div>
+      <div class="terms-box__row"><span>Co-pay</span><strong>${bpsToPercent(loadedInsurerTerms.copayBps)}%</strong></div>
+      <div class="terms-box__row"><span>Platform fee</span><strong>${bpsToPercent(loadedInsurerTerms.platformFeeBps)}%</strong></div>
+      <div class="terms-box__hash">terms hash: ${loadedInsurerTerms.termsHash}</div>
     `;
     el("confirmBtn").disabled = false;
     addLedgerEntry({
-      title: "Loaded patient submission",
-      meta: `hash ${loadedPatientTerms.termsHash}`,
+      title: "Loaded insurer's terms",
+      meta: `hash ${loadedInsurerTerms.termsHash}`,
     });
   } catch (err) {
     box.className = "terms-box terms-box--empty";
-    box.textContent = "Could not load patient submission yet.";
-    addLedgerEntry({ title: "Load patient submission failed", meta: err.message, status: "error" });
+    box.textContent = "Could not load insurer's terms yet.";
+    addLedgerEntry({ title: "Load insurer's terms failed", meta: err.message, status: "error" });
   }
-});
+}
+
+el("loadPatientBtn").addEventListener("click", loadInsurerTerms);
+el("reloadInsurerTermsBtn").addEventListener("click", withSpin(el("reloadInsurerTermsBtn"), loadInsurerTerms));
 
 // ---------- Step 2b: therapist confirms with the SAME terms ----------
 el("confirmBtn").addEventListener("click", async () => {
-  if (!loadedPatientTerms) return;
+  if (!loadedInsurerTerms) return;
   const sessionId = currentSessionId();
   const btn = el("confirmBtn");
   btn.disabled = true;
@@ -73,10 +77,10 @@ el("confirmBtn").addEventListener("click", async () => {
   try {
     const result = await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/confirm`, {
       role: "therapist",
-      sessionRate: loadedPatientTerms.sessionRate,
-      franchiseRemaining: loadedPatientTerms.franchiseRemaining,
-      copayBps: loadedPatientTerms.copayBps,
-      platformFeeBps: loadedPatientTerms.platformFeeBps,
+      sessionRate: loadedInsurerTerms.sessionRate,
+      franchiseRemaining: loadedInsurerTerms.franchiseRemaining,
+      copayBps: loadedInsurerTerms.copayBps,
+      platformFeeBps: loadedInsurerTerms.platformFeeBps,
     });
     pendingEntry.remove();
     addLedgerEntry({
@@ -94,17 +98,17 @@ el("confirmBtn").addEventListener("click", async () => {
 
 // ---------- Step 3: finalize ----------
 el("finalizeBtn").addEventListener("click", async () => {
-  if (!loadedPatientTerms) return;
+  if (!loadedInsurerTerms) return;
   const sessionId = currentSessionId();
   const btn = el("finalizeBtn");
   btn.disabled = true;
   const pendingEntry = addLedgerEntry({ title: "Finalizing invoice on-chain…", status: "pending" });
   try {
     const result = await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/finalize`, {
-      sessionRate: loadedPatientTerms.sessionRate,
-      franchiseRemaining: loadedPatientTerms.franchiseRemaining,
-      copayBps: loadedPatientTerms.copayBps,
-      platformFeeBps: loadedPatientTerms.platformFeeBps,
+      sessionRate: loadedInsurerTerms.sessionRate,
+      franchiseRemaining: loadedInsurerTerms.franchiseRemaining,
+      copayBps: loadedInsurerTerms.copayBps,
+      platformFeeBps: loadedInsurerTerms.platformFeeBps,
     });
     pendingEntry.remove();
     addLedgerEntry({ title: "Invoice finalized (terms hash verified on-chain)", meta: `tx ${result.transactionHash}` });
@@ -119,11 +123,11 @@ el("finalizeBtn").addEventListener("click", async () => {
 });
 
 // ---------- Load status ----------
-el("loadSessionBtn").addEventListener("click", async () => {
+async function refreshFinalizeStatus() {
   const sessionId = currentSessionId();
   try {
     const status = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/confirmations`);
-    if (status.patientConfirmed && status.therapistConfirmed) {
+    if (status.patientConfirmed && status.therapistConfirmed && status.insurerConfirmed) {
       el("finalizeBtn").disabled = !status.termsMatch;
     }
     const invoice = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/invoice`);
@@ -131,4 +135,7 @@ el("loadSessionBtn").addEventListener("click", async () => {
   } catch {
     // fine if nothing exists yet
   }
-});
+}
+
+el("loadSessionBtn").addEventListener("click", refreshFinalizeStatus);
+el("reloadFinalizeStatusBtn").addEventListener("click", withSpin(el("reloadFinalizeStatusBtn"), refreshFinalizeStatus));

@@ -75,6 +75,7 @@ body {
 }
 .role-tag--therapist { background: var(--clay-soft); color: var(--clay); }
 .role-tag--patient { background: #DCEAE4; color: var(--teal-deep); }
+.role-tag--insurer { background: var(--rose-soft); color: var(--rose); }
 
 .masthead__sub {
   margin: 2px 0 0;
@@ -180,6 +181,29 @@ body {
   justify-content: center;
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+.icon-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+.icon-btn:hover:not(:disabled) { color: var(--teal-deep); border-color: var(--teal-deep); background: var(--clay-soft); }
+.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn.spinning svg { animation: spin 0.6s linear; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .step h2 {
