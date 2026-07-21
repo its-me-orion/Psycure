@@ -6,15 +6,16 @@ const {
   ensureTopicId,
   submitTopicMessage,
   fetchSessionCreated,
-  fetchSessionConfirmations,
+  fetchSessionActivity,
 } = require("./hcsClient");
 
 const ROLE_CODES = { patient: 0, therapist: 1, insurer: 2 };
 
 const INVOICE_ABI = [
   "function recordHcsConfirmation(bytes32 sessionId, uint8 role, string hcsMessageId, bytes32 termsHash) external",
+  "function recordAttendance(bytes32 sessionId, uint8 role, string hcsMessageId) external",
   "function finalizeInvoice(bytes32 sessionId, uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external",
-  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool insurerConfirmed,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId,string insurerHcsMessageId,bytes32 patientTermsHash,bytes32 therapistTermsHash,bytes32 insurerTermsHash))",
+  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool insurerConfirmed,bool patientAttended,bool therapistAttended,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId,string insurerHcsMessageId,string patientAttendanceHcsMessageId,string therapistAttendanceHcsMessageId,bytes32 patientTermsHash,bytes32 therapistTermsHash,bytes32 insurerTermsHash))",
   "function defaultPlatformFeeBps() external view returns (uint16)",
   "function computeTermsHash(uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external pure returns (bytes32)",
 ];
@@ -169,8 +170,8 @@ async function confirmSession({ sessionId, role, sessionRate, franchiseRemaining
     if (!topicId) {
       throw new Error("Missing HEDERA_TOPIC_ID environment variable");
     }
-    const { insurerConfirmation } = await fetchSessionConfirmations(topicId, sessionId);
-    if (!insurerConfirmation) {
+    const activity = await fetchSessionActivity(topicId, sessionId);
+    if (!activity.insurerConfirmation) {
       throw new Error(
         "Waiting for the insurer to publish terms before you can confirm — ask your insurer to load this session first."
       );
@@ -198,6 +199,37 @@ async function confirmSession({ sessionId, role, sessionRate, franchiseRemaining
 }
 
 /**
+ * Attendance attestation — patient and therapist each independently confirm
+ * the session actually took place, separately from agreeing to the cost
+ * split. This is deliberately its own HCS message type rather than folded
+ * into SESSION_CONFIRMED: a missing attendance record is evidence of a
+ * different kind of dispute (a no-show) than a missing/mismatched terms
+ * hash (a cost disagreement).
+ *
+ * Attendance is independent of confirmSession — a patient can (and should be
+ * able to) agree to the price before the session happens. It's finalizeInvoice
+ * that requires both attendance records to exist, since that's the step that
+ * actually settles money and is where "did this session happen" matters.
+ */
+async function attendSession({ sessionId, role }) {
+  if (role !== "patient" && role !== "therapist") {
+    throw new Error("role must be either patient or therapist — the insurer does not attend a session");
+  }
+
+  const client = buildHederaClient();
+  const topicId = await ensureTopicId(client);
+
+  const submitResult = await submitTopicMessage(client, topicId, {
+    type: "SESSION_ATTENDED",
+    sessionId,
+    role,
+    attendedAt: new Date().toISOString(),
+  });
+
+  return submitResult;
+}
+
+/**
  * Reads current confirmation status AND the terms each party confirmed, directly
  * from the HCS mirror node. The therapist view uses the patient's submitted
  * franchise/co-pay from here to recompute a matching hash before confirming.
@@ -208,7 +240,7 @@ async function getConfirmationStatus({ sessionId }) {
     throw new Error("Missing HEDERA_TOPIC_ID environment variable");
   }
 
-  const confirmations = await fetchSessionConfirmations(topicId, sessionId);
+  const activity = await fetchSessionActivity(topicId, sessionId);
 
   function summarize(confirmation) {
     if (!confirmation) return null;
@@ -222,9 +254,9 @@ async function getConfirmationStatus({ sessionId }) {
     };
   }
 
-  const patient = summarize(confirmations.patientConfirmation);
-  const therapist = summarize(confirmations.therapistConfirmation);
-  const insurer = summarize(confirmations.insurerConfirmation);
+  const patient = summarize(activity.patientConfirmation);
+  const therapist = summarize(activity.therapistConfirmation);
+  const insurer = summarize(activity.insurerConfirmation);
 
   return {
     sessionId,
@@ -234,6 +266,10 @@ async function getConfirmationStatus({ sessionId }) {
     patient,
     therapist,
     insurer,
+    patientAttended: Boolean(activity.patientAttendance),
+    therapistAttended: Boolean(activity.therapistAttendance),
+    patientAttendedAt: activity.patientAttendance?.payload.attendedAt || null,
+    therapistAttendedAt: activity.therapistAttendance?.payload.attendedAt || null,
     termsMatch: Boolean(
       patient &&
         therapist &&
@@ -245,12 +281,22 @@ async function getConfirmationStatus({ sessionId }) {
 }
 
 /**
- * Step 5 — Records all three HCS confirmations on-chain and finalizes the
- * invoice. The contract itself re-derives the terms hash from these
- * parameters and requires it to equal what all three parties confirmed —
- * this function also checks that off-chain first, so a mismatch fails fast
- * with a clear message instead of spending gas on a transaction that will
- * revert.
+ * Step 5 — Records whatever confirmations and attendance attestations exist
+ * for this session on-chain, then attempts to finalize.
+ *
+ * Deliberately NOT pre-validated off-chain: this used to fail fast with a JS
+ * error if the terms hashes mismatched or attendance was missing, before ever
+ * reaching the contract. That made the PoC's actual enforcement invisible —
+ * the contract's own requires (hash-matching, both-attended) never got
+ * exercised, only this function's copy of the same logic did. Now this just
+ * records what's actually there and calls the contract's finalizeInvoice,
+ * letting a genuinely invalid attempt revert *on-chain* — which is the point
+ * for a PoC meant to demonstrate that the smart contract itself enforces
+ * these rules, not just the frontend.
+ *
+ * The only things still checked here are structural, not business-rule:
+ * patient/therapist/insurer confirmations must actually exist, because
+ * without them there's no termsHash to record on-chain at all.
  */
 async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, copayBps, platformFeeBps }) {
   const topicId = process.env.HEDERA_TOPIC_ID;
@@ -258,62 +304,50 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     throw new Error("Missing HEDERA_TOPIC_ID environment variable");
   }
 
-  const confirmations = await fetchSessionConfirmations(topicId, sessionId);
-  if (!confirmations.patientConfirmation || !confirmations.therapistConfirmation || !confirmations.insurerConfirmation) {
+  const activity = await fetchSessionActivity(topicId, sessionId);
+  if (!activity.patientConfirmation || !activity.therapistConfirmation || !activity.insurerConfirmation) {
     throw new Error("Cannot finalize invoice: patient, therapist and insurer HCS confirmations are all required");
   }
 
-  const patientHash = confirmations.patientConfirmation.payload.termsHash;
-  const therapistHash = confirmations.therapistConfirmation.payload.termsHash;
-  const insurerHash = confirmations.insurerConfirmation.payload.termsHash;
+  const patientHash = activity.patientConfirmation.payload.termsHash;
+  const therapistHash = activity.therapistConfirmation.payload.termsHash;
+  const insurerHash = activity.insurerConfirmation.payload.termsHash;
 
   if (!patientHash || !therapistHash || !insurerHash) {
     throw new Error("Cannot finalize invoice: one or more confirmations are missing a terms hash (stale format?)");
   }
 
-  if (patientHash !== therapistHash || patientHash !== insurerHash) {
-    throw new Error(
-      "Cannot finalize invoice: patient, therapist and insurer confirmed different terms (terms hash mismatch). " +
-        "Ask all three parties to re-confirm using the same session rate, franchise remaining and co-pay."
-    );
-  }
-
-  const expectedHash = computeTermsHash({ sessionRate, franchiseRemaining, copayBps, platformFeeBps });
-  if (expectedHash !== patientHash) {
-    throw new Error(
-      "Cannot finalize invoice: the numbers submitted for finalization do not match what patient, therapist " +
-        "and insurer actually confirmed. Use the confirmed session rate, franchise remaining, co-pay and fee exactly."
-    );
-  }
-
   const contract = getContract();
   const sessionHash = toSessionHash(sessionId);
 
-  const patientMessageId = `${topicId}@${confirmations.patientConfirmation.sequence_number}`;
-  const therapistMessageId = `${topicId}@${confirmations.therapistConfirmation.sequence_number}`;
-  const insurerMessageId = `${topicId}@${confirmations.insurerConfirmation.sequence_number}`;
+  const patientMessageId = `${topicId}@${activity.patientConfirmation.sequence_number}`;
+  const therapistMessageId = `${topicId}@${activity.therapistConfirmation.sequence_number}`;
+  const insurerMessageId = `${topicId}@${activity.insurerConfirmation.sequence_number}`;
 
-  const recordPatientTx = await contract.recordHcsConfirmation(
-    sessionHash,
-    ROLE_CODES.patient,
-    patientMessageId,
-    patientHash
-  );
-  await recordPatientTx.wait();
-  const recordTherapistTx = await contract.recordHcsConfirmation(
-    sessionHash,
-    ROLE_CODES.therapist,
-    therapistMessageId,
-    therapistHash
-  );
-  await recordTherapistTx.wait();
-  const recordInsurerTx = await contract.recordHcsConfirmation(
-    sessionHash,
-    ROLE_CODES.insurer,
-    insurerMessageId,
-    insurerHash
-  );
-  await recordInsurerTx.wait();
+  await (
+    await contract.recordHcsConfirmation(sessionHash, ROLE_CODES.patient, patientMessageId, patientHash)
+  ).wait();
+  await (
+    await contract.recordHcsConfirmation(sessionHash, ROLE_CODES.therapist, therapistMessageId, therapistHash)
+  ).wait();
+  await (
+    await contract.recordHcsConfirmation(sessionHash, ROLE_CODES.insurer, insurerMessageId, insurerHash)
+  ).wait();
+
+  // Only record attendance that actually exists — recordAttendance requires a
+  // real HCS message id, so a missing attestation simply isn't recorded, and
+  // the contract's own "Both parties must have attended" check will catch it
+  // at finalize.
+  let patientAttendanceMessageId = null;
+  if (activity.patientAttendance) {
+    patientAttendanceMessageId = `${topicId}@${activity.patientAttendance.sequence_number}`;
+    await (await contract.recordAttendance(sessionHash, ROLE_CODES.patient, patientAttendanceMessageId)).wait();
+  }
+  let therapistAttendanceMessageId = null;
+  if (activity.therapistAttendance) {
+    therapistAttendanceMessageId = `${topicId}@${activity.therapistAttendance.sequence_number}`;
+    await (await contract.recordAttendance(sessionHash, ROLE_CODES.therapist, therapistAttendanceMessageId)).wait();
+  }
 
   const finalizeTx = await contract.finalizeInvoice(
     sessionHash,
@@ -331,6 +365,8 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     patientMessageId,
     therapistMessageId,
     insurerMessageId,
+    patientAttendanceMessageId,
+    therapistAttendanceMessageId,
     termsHash: patientHash,
   };
 }
@@ -350,6 +386,8 @@ async function viewInvoice({ sessionId }) {
     patientConfirmed: invoice.patientConfirmed,
     therapistConfirmed: invoice.therapistConfirmed,
     insurerConfirmed: invoice.insurerConfirmed,
+    patientAttended: invoice.patientAttended,
+    therapistAttended: invoice.therapistAttended,
     finalized: invoice.finalized,
     sessionRate: invoice.sessionRate.toString(),
     franchiseRemaining: invoice.franchiseRemaining.toString(),
@@ -362,6 +400,8 @@ async function viewInvoice({ sessionId }) {
     patientHcsMessageId: invoice.patientHcsMessageId,
     therapistHcsMessageId: invoice.therapistHcsMessageId,
     insurerHcsMessageId: invoice.insurerHcsMessageId,
+    patientAttendanceHcsMessageId: invoice.patientAttendanceHcsMessageId,
+    therapistAttendanceHcsMessageId: invoice.therapistAttendanceHcsMessageId,
     patientTermsHash: invoice.patientTermsHash,
     therapistTermsHash: invoice.therapistTermsHash,
     insurerTermsHash: invoice.insurerTermsHash,
@@ -376,6 +416,7 @@ module.exports = {
   getSessionTerms,
   getDefaultPlatformFeeBps,
   confirmSession,
+  attendSession,
   getConfirmationStatus,
   finalizeInvoice,
   viewInvoice,

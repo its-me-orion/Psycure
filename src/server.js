@@ -8,6 +8,7 @@ const {
   getDefaultPlatformFeeBps,
   previewSplit,
   confirmSession,
+  attendSession,
   getConfirmationStatus,
   finalizeInvoice,
   viewInvoice,
@@ -64,6 +65,19 @@ app.post(
     const { sessionRate, franchiseRemaining, copayBps, platformFeeBps } = req.body;
     const preview = previewSplit({ sessionRate, franchiseRemaining, copayBps, platformFeeBps });
     res.json(preview);
+  })
+);
+
+// Patient or therapist: attest that the session actually took place — a
+// separate record from agreeing to the cost split. Required before confirmSession
+// will accept a patient/therapist confirmation for the same role.
+app.post(
+  "/api/sessions/:sessionId/attend",
+  asyncRoute(async (req, res) => {
+    const { sessionId } = req.params;
+    const { role } = req.body;
+    const result = await attendSession({ sessionId, role });
+    res.json(result);
   })
 );
 

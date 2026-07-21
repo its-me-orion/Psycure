@@ -82,7 +82,7 @@ async function fetchSessionCreated(topicId, sessionId) {
   );
 }
 
-async function fetchSessionConfirmations(topicId, sessionId) {
+async function fetchSessionActivity(topicId, sessionId) {
   const mirrorBase = process.env.HEDERA_MIRROR_NODE_URL || DEFAULT_MIRROR_NODE;
   const url = `${mirrorBase}/api/v1/topics/${topicId}/messages?order=desc&limit=100`;
 
@@ -128,10 +128,26 @@ async function fetchSessionConfirmations(topicId, sessionId) {
       msg.payload?.role === "insurer"
   );
 
+  const patientAttendance = messages.find(
+    (msg) =>
+      msg.payload?.type === "SESSION_ATTENDED" &&
+      msg.payload?.sessionId === sessionId &&
+      msg.payload?.role === "patient"
+  );
+
+  const therapistAttendance = messages.find(
+    (msg) =>
+      msg.payload?.type === "SESSION_ATTENDED" &&
+      msg.payload?.sessionId === sessionId &&
+      msg.payload?.role === "therapist"
+  );
+
   return {
     patientConfirmation,
     therapistConfirmation,
     insurerConfirmation,
+    patientAttendance,
+    therapistAttendance,
   };
 }
 
@@ -140,5 +156,5 @@ module.exports = {
   ensureTopicId,
   submitTopicMessage,
   fetchSessionCreated,
-  fetchSessionConfirmations,
+  fetchSessionActivity,
 };

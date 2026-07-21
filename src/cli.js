@@ -7,6 +7,7 @@ const {
   getDefaultPlatformFeeBps,
   previewSplit,
   confirmSession,
+  attendSession,
   finalizeInvoice,
   viewInvoice,
 } = require("./psycureService");
@@ -65,6 +66,16 @@ async function handlePreview(parsedArgs) {
   console.log({ platformFeeBpsUsed: parsedArgs["platform-fee-bps"] || defaultFeeBps, ...preview });
 }
 
+async function handleAttendSession(parsedArgs) {
+  const result = await attendSession({
+    sessionId: getRequiredArg(parsedArgs, "session-id"),
+    role: getRequiredArg(parsedArgs, "role"),
+  });
+
+  console.log("Attendance attestation submitted to HCS:");
+  console.log(result);
+}
+
 async function handleConfirmSession(parsedArgs) {
   const defaultFeeBps = await getDefaultPlatformFeeBps();
   const result = await confirmSession({
@@ -111,16 +122,22 @@ patient and therapist mirror the insurer's terms rather than typing their own):
      npm run cli -- preview --rate 18000 --franchise 10000 --copay-bps 1000
      npm run cli -- confirm-session --session-id S1 --role insurer --rate 18000 --franchise 10000 --copay-bps 1000
 
-  3) Patient confirms with the SAME terms (fails until the insurer has confirmed):
+  3) Patient confirms with the SAME terms — agreeing to the price BEFORE the session happens
+     (fails until the insurer has published terms):
      npm run cli -- confirm-session --session-id S1 --role patient --rate 18000 --franchise 10000 --copay-bps 1000
 
   4) Therapist confirms with the SAME terms (must match exactly or finalize will reject):
      npm run cli -- confirm-session --session-id S1 --role therapist --rate 18000 --franchise 10000 --copay-bps 1000
 
-  5) Finalize on-chain (contract re-checks the terms hash itself):
+  5) After the session takes place, patient and therapist each attest they attended
+     (a separate record from agreeing to the cost — required before finalize will accept):
+     npm run cli -- attend-session --session-id S1 --role patient
+     npm run cli -- attend-session --session-id S1 --role therapist
+
+  6) Finalize on-chain (contract re-checks the terms hash itself; requires both attendances too):
      npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000
 
-  6) View the result:
+  7) View the result:
      npm run cli -- view-invoice --session-id S1
 
   Or run "npm run web" for the browser UI (separate insurer/patient/therapist pages).`);
@@ -138,6 +155,7 @@ async function main() {
   if (command === "create-session") return handleCreateSession(args);
   if (command === "view-terms") return handleViewTerms(args);
   if (command === "preview") return handlePreview(args);
+  if (command === "attend-session") return handleAttendSession(args);
   if (command === "confirm-session") return handleConfirmSession(args);
   if (command === "finalize-invoice") return handleFinalizeInvoice(args);
   if (command === "view-invoice") return handleViewInvoice(args);
