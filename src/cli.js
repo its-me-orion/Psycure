@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 require("dotenv").config();
 
-const { ethers } = require("ethers");
 const {
-  buildHederaClient,
-  ensureTopicId,
-  submitTopicMessage,
-  fetchSessionConfirmations,
-} = require("./hcsClient");
-
-const INVOICE_ABI = [
-  "function recordHcsConfirmation(bytes32 sessionId, bool isPatient, string hcsMessageId) external",
-  "function finalizeInvoice(bytes32 sessionId, uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external",
-  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId))",
-];
+  createSession,
+  getSessionTerms,
+  getDefaultPlatformFeeBps,
+  previewSplit,
+  confirmSession,
+  finalizeInvoice,
+  viewInvoice,
+} = require("./psycureService");
 
 function parseArgs(args) {
   const parsed = {};
@@ -34,157 +30,100 @@ function getRequiredArg(parsedArgs, key) {
   return value;
 }
 
-function getContract() {
-  const rpcUrl = process.env.HEDERA_JSON_RPC_URL || "https://testnet.hashio.io/api";
-  const contractAddress = process.env.CONTRACT_ADDRESS;
-  const privateKey = process.env.EVM_PRIVATE_KEY;
-
-  if (!contractAddress) {
-    throw new Error("Missing CONTRACT_ADDRESS environment variable");
-  }
-  if (!privateKey) {
-    throw new Error("Missing EVM_PRIVATE_KEY environment variable");
-  }
-
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const wallet = new ethers.Wallet(privateKey, provider);
-  return new ethers.Contract(contractAddress, INVOICE_ABI, wallet);
-}
-
-function toSessionHash(sessionId) {
-  return ethers.keccak256(ethers.toUtf8Bytes(sessionId));
-}
-
 async function handleCreateSession(parsedArgs) {
-  const sessionId = getRequiredArg(parsedArgs, "session-id");
-  const date = getRequiredArg(parsedArgs, "date");
-  const startTime = getRequiredArg(parsedArgs, "start");
-  const endTime = getRequiredArg(parsedArgs, "end");
-  const patient = getRequiredArg(parsedArgs, "patient");
-  const therapist = getRequiredArg(parsedArgs, "therapist");
-
-  const client = buildHederaClient();
-  const topicId = await ensureTopicId(client);
-
-  const submitResult = await submitTopicMessage(client, topicId, {
-    type: "SESSION_CREATED",
-    sessionId,
-    date,
-    startTime,
-    endTime,
-    patient,
-    therapist,
+  const result = await createSession({
+    sessionId: getRequiredArg(parsedArgs, "session-id"),
+    date: getRequiredArg(parsedArgs, "date"),
+    startTime: getRequiredArg(parsedArgs, "start"),
+    endTime: getRequiredArg(parsedArgs, "end"),
+    patient: getRequiredArg(parsedArgs, "patient"),
+    therapist: getRequiredArg(parsedArgs, "therapist"),
+    insurer: getRequiredArg(parsedArgs, "insurer"),
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
   });
 
-  console.log("Session created and logged on HCS:");
-  console.log(submitResult);
-  if (!process.env.HEDERA_TOPIC_ID) {
-    console.log(`Remember to set HEDERA_TOPIC_ID=${submitResult.topicId} in your .env`);
+  console.log("Session created (with rate) and logged on HCS:");
+  console.log(result);
+  if (!result.topicIdWasFromEnv) {
+    console.log(`Remember to set HEDERA_TOPIC_ID=${result.topicId} in your .env`);
   }
+}
+
+async function handleViewTerms(parsedArgs) {
+  const terms = await getSessionTerms({ sessionId: getRequiredArg(parsedArgs, "session-id") });
+  console.log(terms);
+}
+
+async function handlePreview(parsedArgs) {
+  const defaultFeeBps = await getDefaultPlatformFeeBps();
+  const preview = previewSplit({
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
+    franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
+    copayBps: getRequiredArg(parsedArgs, "copay-bps"),
+    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
+  });
+  console.log({ platformFeeBpsUsed: parsedArgs["platform-fee-bps"] || defaultFeeBps, ...preview });
 }
 
 async function handleConfirmSession(parsedArgs) {
-  const sessionId = getRequiredArg(parsedArgs, "session-id");
-  const role = getRequiredArg(parsedArgs, "role");
-
-  if (role !== "patient" && role !== "therapist") {
-    throw new Error("--role must be either patient or therapist");
-  }
-
-  const client = buildHederaClient();
-  const topicId = await ensureTopicId(client);
-
-  const submitResult = await submitTopicMessage(client, topicId, {
-    type: "SESSION_CONFIRMED",
-    sessionId,
-    role,
-    confirmedAt: new Date().toISOString(),
+  const defaultFeeBps = await getDefaultPlatformFeeBps();
+  const result = await confirmSession({
+    sessionId: getRequiredArg(parsedArgs, "session-id"),
+    role: getRequiredArg(parsedArgs, "role"),
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
+    franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
+    copayBps: getRequiredArg(parsedArgs, "copay-bps"),
+    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
   });
 
-  console.log("Session confirmation submitted to HCS:");
-  console.log(submitResult);
+  console.log("Session confirmation (with terms hash) submitted to HCS:");
+  console.log(result);
 }
 
 async function handleFinalizeInvoice(parsedArgs) {
-  const sessionId = getRequiredArg(parsedArgs, "session-id");
-  const sessionRate = BigInt(getRequiredArg(parsedArgs, "rate"));
-  const franchiseRemaining = BigInt(getRequiredArg(parsedArgs, "franchise"));
-  const copayBps = Number(getRequiredArg(parsedArgs, "copay-bps"));
-  const platformFeeBps = Number(parsedArgs["platform-fee-bps"] || "0");
-
-  const topicId = process.env.HEDERA_TOPIC_ID;
-  if (!topicId) {
-    throw new Error("Missing HEDERA_TOPIC_ID environment variable");
-  }
-
-  const confirmations = await fetchSessionConfirmations(topicId, sessionId);
-  if (!confirmations.patientConfirmation || !confirmations.therapistConfirmation) {
-    throw new Error("Cannot finalize invoice: both patient and therapist HCS confirmations are required");
-  }
-
-  const contract = getContract();
-  const sessionHash = toSessionHash(sessionId);
-
-  const patientMessageId = `${topicId}@${confirmations.patientConfirmation.sequence_number}`;
-  const therapistMessageId = `${topicId}@${confirmations.therapistConfirmation.sequence_number}`;
-
-  const recordPatientTx = await contract.recordHcsConfirmation(sessionHash, true, patientMessageId);
-  await recordPatientTx.wait();
-  const recordTherapistTx = await contract.recordHcsConfirmation(sessionHash, false, therapistMessageId);
-  await recordTherapistTx.wait();
-
-  const finalizeTx = await contract.finalizeInvoice(
-    sessionHash,
-    sessionRate,
-    franchiseRemaining,
-    copayBps,
-    platformFeeBps
-  );
-  const finalizeReceipt = await finalizeTx.wait();
-
-  console.log("Invoice finalized on-chain:");
-  console.log({
-    sessionId,
-    sessionHash,
-    transactionHash: finalizeReceipt.hash,
-    patientMessageId,
-    therapistMessageId,
+  const defaultFeeBps = await getDefaultPlatformFeeBps();
+  const result = await finalizeInvoice({
+    sessionId: getRequiredArg(parsedArgs, "session-id"),
+    sessionRate: getRequiredArg(parsedArgs, "rate"),
+    franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
+    copayBps: getRequiredArg(parsedArgs, "copay-bps"),
+    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
   });
+
+  console.log("Invoice finalized on-chain (terms hash verified):");
+  console.log(result);
 }
 
 async function handleViewInvoice(parsedArgs) {
-  const sessionId = getRequiredArg(parsedArgs, "session-id");
-  const contract = getContract();
-  const sessionHash = toSessionHash(sessionId);
-  const invoiceResult = await contract.getInvoice(sessionHash);
-  const invoice = invoiceResult.finalized !== undefined ? invoiceResult : invoiceResult[0];
-
-  console.log({
-    sessionId,
-    sessionHash,
-    patientConfirmed: invoice.patientConfirmed,
-    therapistConfirmed: invoice.therapistConfirmed,
-    finalized: invoice.finalized,
-    sessionRate: invoice.sessionRate.toString(),
-    franchiseRemaining: invoice.franchiseRemaining.toString(),
-    copayBps: Number(invoice.copayBps),
-    platformFeeBps: Number(invoice.platformFeeBps),
-    patientAmount: invoice.patientAmount.toString(),
-    insurerAmount: invoice.insurerAmount.toString(),
-    platformFeeAmount: invoice.platformFeeAmount.toString(),
-    therapistPayout: invoice.therapistPayout.toString(),
-    patientHcsMessageId: invoice.patientHcsMessageId,
-    therapistHcsMessageId: invoice.therapistHcsMessageId,
-  });
+  const result = await viewInvoice({ sessionId: getRequiredArg(parsedArgs, "session-id") });
+  console.log(result);
 }
 
 function printUsage() {
-  console.log(`Usage:
-  npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob
-  npm run cli -- confirm-session --session-id S1 --role patient
-  npm run cli -- confirm-session --session-id S1 --role therapist
-  npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000 --platform-fee-bps 100
-  npm run cli -- view-invoice --session-id S1`);
+  console.log(`Usage (three-party flow — the insurer is the authoritative source of franchise/co-pay;
+patient and therapist mirror the insurer's terms rather than typing their own):
+
+  1) Therapist creates the session with the rate:
+     npm run cli -- create-session --session-id S1 --date 2026-07-17 --start 09:00 --end 09:50 --patient alice --therapist bob --insurer acme-insurance --rate 18000
+
+  2) Insurer looks up the session (to see the rate) and publishes the authoritative terms:
+     npm run cli -- view-terms --session-id S1
+     npm run cli -- preview --rate 18000 --franchise 10000 --copay-bps 1000
+     npm run cli -- confirm-session --session-id S1 --role insurer --rate 18000 --franchise 10000 --copay-bps 1000
+
+  3) Patient confirms with the SAME terms (fails until the insurer has confirmed):
+     npm run cli -- confirm-session --session-id S1 --role patient --rate 18000 --franchise 10000 --copay-bps 1000
+
+  4) Therapist confirms with the SAME terms (must match exactly or finalize will reject):
+     npm run cli -- confirm-session --session-id S1 --role therapist --rate 18000 --franchise 10000 --copay-bps 1000
+
+  5) Finalize on-chain (contract re-checks the terms hash itself):
+     npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000
+
+  6) View the result:
+     npm run cli -- view-invoice --session-id S1
+
+  Or run "npm run web" for the browser UI (separate insurer/patient/therapist pages).`);
 }
 
 async function main() {
@@ -196,25 +135,12 @@ async function main() {
     return;
   }
 
-  if (command === "create-session") {
-    await handleCreateSession(args);
-    return;
-  }
-
-  if (command === "confirm-session") {
-    await handleConfirmSession(args);
-    return;
-  }
-
-  if (command === "finalize-invoice") {
-    await handleFinalizeInvoice(args);
-    return;
-  }
-
-  if (command === "view-invoice") {
-    await handleViewInvoice(args);
-    return;
-  }
+  if (command === "create-session") return handleCreateSession(args);
+  if (command === "view-terms") return handleViewTerms(args);
+  if (command === "preview") return handlePreview(args);
+  if (command === "confirm-session") return handleConfirmSession(args);
+  if (command === "finalize-invoice") return handleFinalizeInvoice(args);
+  if (command === "view-invoice") return handleViewInvoice(args);
 
   throw new Error(`Unknown command: ${command}`);
 }

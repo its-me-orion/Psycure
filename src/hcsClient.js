@@ -18,7 +18,7 @@ function getEnv(name) {
 
 function buildHederaClient() {
   const operatorId = getEnv("OPERATOR_ACCOUNT_ID");
-  const operatorKey = PrivateKey.fromStringED25519(getEnv("OPERATOR_PRIVATE_KEY"));
+  const operatorKey = PrivateKey.fromStringECDSA(getEnv("OPERATOR_PRIVATE_KEY"));
   const client = Client.forTestnet();
   client.setOperator(operatorId, operatorKey);
   return client;
@@ -54,6 +54,32 @@ async function submitTopicMessage(client, topicId, payload) {
     sequenceNumber: submitReceipt.topicSequenceNumber?.toString() || "",
     transactionId: submitTx.transactionId?.toString() || "",
   };
+}
+
+async function fetchSessionCreated(topicId, sessionId) {
+  const mirrorBase = process.env.HEDERA_MIRROR_NODE_URL || DEFAULT_MIRROR_NODE;
+  const url = `${mirrorBase}/api/v1/topics/${topicId}/messages?order=desc&limit=100`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch topic messages (${response.status})`);
+  }
+
+  const data = await response.json();
+  const messages = (data.messages || [])
+    .map((message) => {
+      const decoded = Buffer.from(message.message, "base64").toString("utf8");
+      try {
+        return { sequence_number: message.sequence_number, payload: JSON.parse(decoded) };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  return messages.find(
+    (msg) => msg.payload?.type === "SESSION_CREATED" && msg.payload?.sessionId === sessionId
+  );
 }
 
 async function fetchSessionConfirmations(topicId, sessionId) {
@@ -95,9 +121,17 @@ async function fetchSessionConfirmations(topicId, sessionId) {
       msg.payload?.role === "therapist"
   );
 
+  const insurerConfirmation = messages.find(
+    (msg) =>
+      msg.payload?.type === "SESSION_CONFIRMED" &&
+      msg.payload?.sessionId === sessionId &&
+      msg.payload?.role === "insurer"
+  );
+
   return {
     patientConfirmation,
     therapistConfirmation,
+    insurerConfirmation,
   };
 }
 
@@ -105,5 +139,6 @@ module.exports = {
   buildHederaClient,
   ensureTopicId,
   submitTopicMessage,
+  fetchSessionCreated,
   fetchSessionConfirmations,
 };

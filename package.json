@@ -7,7 +7,8 @@
     "test": "hardhat test",
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.js --network hederaTestnet",
-    "cli": "node src/cli.js"
+    "cli": "node src/cli.js",
+    "web": "node src/server.js"
   },
   "repository": {
     "type": "git",
@@ -25,7 +26,8 @@
   "dependencies": {
     "@hashgraph/sdk": "2.24.0",
     "dotenv": "^17.4.2",
-    "ethers": "^6.17.0"
+    "ethers": "^6.17.0",
+    "express": "^4.19.2"
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.4"

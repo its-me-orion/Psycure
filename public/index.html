@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Psycure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+<style>
+  .landing { max-width: 640px; margin: 0 auto; padding: 80px 24px; text-align: center; }
+  .landing__mark { color: #1F4A41; margin-bottom: 18px; }
+  .landing h1 { font-family: "Fraunces", serif; font-weight: 600; font-size: 30px; margin: 0 0 10px; }
+  .landing p { color: #55655F; margin: 0 0 40px; }
+  .landing__choices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .landing__card {
+    display: block; text-decoration: none; color: inherit;
+    background: #FBFCFA; border: 1px solid #D7DED3; border-radius: 12px;
+    padding: 28px 20px; transition: transform 0.1s ease, border-color 0.15s ease;
+  }
+  .landing__card:hover { border-color: #2F6F62; transform: translateY(-2px); }
+  .landing__card h2 { font-family: "Fraunces", serif; font-size: 18px; margin: 10px 0 6px; }
+  .landing__card p { font-size: 13px; margin: 0; }
+  @media (max-width: 760px) { .landing__choices { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <div class="landing">
+    <div class="landing__mark">
+      <svg width="40" height="40" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17 2 L30 9 V19 C30 25.5 24 30.5 17 32 C10 30.5 4 25.5 4 19 V9 Z" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M12 17.5 L15.5 21 L22.5 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>Psycure</h1>
+    <p>Session ledger &amp; invoice settlement — Hedera testnet PoC. Choose your side of the session.</p>
+    <div class="landing__choices">
+      <a class="landing__card" href="therapist.html">
+        <h2>Therapist</h2>
+        <p>Create a session, set the rate, review the patient's terms, and finalize.</p>
+      </a>
+      <a class="landing__card" href="patient.html">
+        <h2>Patient</h2>
+        <p>Look up a session, wait for your insurer's terms, preview your cost, and confirm.</p>
+      </a>
+      <a class="landing__card" href="insurer.html">
+        <h2>Insurer</h2>
+        <p>Look up a session, publish the franchise remaining &amp; co-pay terms, and confirm.</p>
+      </a>
+    </div>
+  </div>
+</body>
+</html>

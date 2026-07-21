@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Psycure — Patient</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <a href="index.html" class="masthead__mark" title="Back to start">
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17 2 L30 9 V19 C30 25.5 24 30.5 17 32 C10 30.5 4 25.5 4 19 V9 Z" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M12 17.5 L15.5 21 L22.5 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </a>
+    <div>
+      <h1>Psycure <span class="role-tag role-tag--patient">Patient</span></h1>
+      <p class="masthead__sub">Look up your session, wait for your insurer's terms, preview your cost, then confirm.</p>
+    </div>
+    <div class="masthead__net">
+      <span class="dot" id="netDot"></span>
+      <span id="netLabel">checking network…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="flow">
+
+      <div class="session-picker">
+        <label for="sessionId">Session ID (from your therapist)</label>
+        <input id="sessionId" type="text" value="S1" spellcheck="false" />
+        <button id="loadSessionBtn" class="ghost-btn">Load session</button>
+      </div>
+
+      <!-- STEP 1 -->
+      <article class="step" data-step="1">
+        <div class="step__head">
+          <span class="step__num">01</span>
+          <div>
+            <h2>Session details</h2>
+            <p>Read directly from HCS — this is the rate your therapist set when creating the session.</p>
+          </div>
+        </div>
+        <div class="step__body">
+          <div id="sessionDetailsBox" class="terms-box terms-box--empty">Load a session to see its details.</div>
+        </div>
+      </article>
+
+      <!-- STEP 2 -->
+      <article class="step" data-step="2">
+        <div class="step__head">
+          <span class="step__num">02</span>
+          <div>
+            <h2>Your insurance terms</h2>
+            <p>Your insurer publishes your remaining franchise and co-pay rate — you don't need to remember or enter these yourself.</p>
+          </div>
+          <button id="reloadInsurerTermsBtn" class="icon-btn" type="button" title="Check again for insurer's terms" aria-label="Check again for insurer's terms">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+        </div>
+        <div class="step__body">
+          <div id="insurerTermsBox" class="terms-box terms-box--empty">Load a session to check for your insurer's terms.</div>
+          <div id="previewBox" class="invoice-result invoice-result--empty">Your cost breakdown will appear here once your insurer has published terms.</div>
+        </div>
+      </article>
+
+      <!-- STEP 3 -->
+      <article class="step" data-step="3">
+        <div class="step__head">
+          <span class="step__num">03</span>
+          <div>
+            <h2>Confirm</h2>
+            <p>This submits your confirmation — mirroring your insurer's published terms — to HCS. Your therapist must confirm the same terms before the invoice can be finalized.</p>
+          </div>
+          <button id="reloadStatusBtn" class="icon-btn" type="button" title="Refresh confirmation status" aria-label="Refresh confirmation status">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+        </div>
+        <div class="step__body">
+          <button id="confirmBtn" class="primary-btn" disabled>Confirm as patient</button>
+          <div id="statusBox" class="terms-box terms-box--empty">Not confirmed yet.</div>
+        </div>
+      </article>
+
+      <!-- STEP 4 -->
+      <article class="step" data-step="4">
+        <div class="step__head">
+          <span class="step__num">04</span>
+          <div>
+            <h2>Invoice status</h2>
+            <p>Once your therapist finalizes, the result appears here.</p>
+          </div>
+        </div>
+        <div class="step__body">
+          <button id="viewBtn" class="secondary-btn">Refresh invoice</button>
+          <div id="invoiceResult" class="invoice-result invoice-result--empty">
+            No invoice finalized yet for this session.
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <aside class="ledger">
+      <h3>Ledger trail&nbsp;&nbsp;<span class="role-tag role-tag--patient">Patient</span></h3>
+      <p class="ledger__hint">Every write shown here actually lands on Hedera testnet.</p>
+      <div id="ledgerEntries" class="ledger__entries">
+        <div class="ledger__empty">No activity yet — load a session to begin.</div>
+      </div>
+    </aside>
+
+  </main>
+
+  <footer class="foot">
+    Proof-of-concept for DDiB '26 (UZH) — not for real patient data.
+    <a href="insurer.html">Switch to insurer view →</a> · <a href="therapist.html">Switch to therapist view →</a>
+  </footer>
+
+</div>
+
+<script src="shared.js"></script>
+<script src="patient.js"></script>
+</body>
+</html>
