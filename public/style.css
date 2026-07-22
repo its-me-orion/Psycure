@@ -31,6 +31,12 @@ body {
   line-height: 1.5;
 }
 
+/* Subtle per-role page tint — same accent family as that role's role-tag,
+   just enough to tell tabs apart at a glance without fighting the content. */
+body.role-therapist { --bg: #F4EEE2; }
+body.role-patient { --bg: #E7F1EC; }
+body.role-insurer { --bg: #F5EAE8; }
+
 .wrap {
   max-width: 1180px;
   margin: 0 auto;
@@ -76,6 +82,18 @@ body {
 .role-tag--therapist { background: var(--clay-soft); color: var(--clay); }
 .role-tag--patient { background: #DCEAE4; color: var(--teal-deep); }
 .role-tag--insurer { background: var(--rose-soft); color: var(--rose); }
+
+/* Pinned corner indicator of which role's screen you're looking at — unlike
+   the inline role-tag in the masthead, this stays visible while scrolling
+   and while flicking between browser tabs for different roles. */
+.role-flag {
+  position: fixed;
+  top: 10px;
+  right: 16px;
+  z-index: 200;
+  padding: 5px 13px;
+  box-shadow: 0 2px 8px rgba(31, 43, 39, 0.14);
+}
 
 .masthead__sub {
   margin: 2px 0 0;
@@ -273,6 +291,22 @@ button {
 }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Same button classes get used on <a> tags in a couple of places (e.g. the
+   chat link) — button{} above only targets real <button> elements, so those
+   need their own box/cursor/underline reset to actually look like a button. */
+a.primary-btn, a.secondary-btn, a.ghost-btn {
+  display: inline-block;
+  text-decoration: none;
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 13.5px;
+  line-height: normal;
+  border-radius: 7px;
+  border-width: 1px;
+  border-style: solid;
+  cursor: pointer;
+}
 
 .primary-btn {
   background: var(--teal-deep);

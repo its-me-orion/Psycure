@@ -4,3 +4,4 @@ cache/
 coverage/
 .env
 invoices/
+data/chat/

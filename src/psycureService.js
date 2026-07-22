@@ -9,8 +9,38 @@ const {
   fetchSessionCreated,
   fetchSessionActivity,
 } = require("./hcsClient");
+const { createConversation, sendMessage } = require("./chatService");
 
 const ROLE_CODES = { patient: 0, therapist: 1, insurer: 2 };
+
+function capitalize(role) {
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+/**
+ * Appends a system entry to the session's chat history — a timeline of
+ * create/confirm/attend/finalize events, separate from the patient<->therapist
+ * messages themselves. `patientAlias`/`therapistAlias` seed the conversation's
+ * participant record the first time it's written (createConversation is a
+ * no-op on later calls), so the chat isn't stuck with placeholder names.
+ * Deliberately never throws: the underlying HCS/on-chain action this is
+ * logging has already succeeded by the time this runs, and a local chat-file
+ * write failing must not make that action look like it failed too.
+ */
+function logChatEvent({ sessionId, content, patientAlias, therapistAlias }) {
+  try {
+    createConversation({
+      sessionId,
+      patientId: patientAlias || "patient",
+      therapistId: therapistAlias || "therapist",
+      patientAlias: patientAlias || "Patient",
+      therapistAlias: therapistAlias || "Therapist",
+    });
+    sendMessage({ sessionId, senderRole: "system", senderId: "system", content });
+  } catch (err) {
+    console.error(`Failed to log chat event for session ${sessionId}:`, err.message || err);
+  }
+}
 
 const INVOICE_ABI = [
   "function recordHcsConfirmation(bytes32 sessionId, uint8 role, string hcsMessageId, bytes32 termsHash) external",
@@ -102,6 +132,13 @@ async function createSession({ sessionId, date, startTime, endTime, patient, the
     therapist,
     insurer,
     sessionRate: String(sessionRate),
+  });
+
+  logChatEvent({
+    sessionId,
+    patientAlias: patient,
+    therapistAlias: therapist,
+    content: `Session created by ${therapist}. Rate CHF ${(Number(sessionRate) / 100).toFixed(2)}, scheduled ${date} ${startTime}-${endTime}.`,
   });
 
   return {
@@ -196,6 +233,11 @@ async function confirmSession({ sessionId, role, sessionRate, franchiseRemaining
     termsHash: hash,
   });
 
+  logChatEvent({
+    sessionId,
+    content: `${capitalize(role)} confirmed the session terms (CHF ${(Number(sessionRate) / 100).toFixed(2)}, co-pay ${(Number(copayBps) / 100).toFixed(2)}%).`,
+  });
+
   return { ...submitResult, termsHash: hash };
 }
 
@@ -225,6 +267,11 @@ async function attendSession({ sessionId, role }) {
     sessionId,
     role,
     attendedAt: new Date().toISOString(),
+  });
+
+  logChatEvent({
+    sessionId,
+    content: `${capitalize(role)} confirmed attendance for this session.`,
   });
 
   return submitResult;
@@ -490,6 +537,11 @@ async function finalizeInvoice({ sessionId }) {
 
   const finalizeTx = await contract.finalizeInvoice(sessionHash, invoiceHash);
   const finalizeReceipt = await finalizeTx.wait();
+
+  logChatEvent({
+    sessionId,
+    content: `Invoice finalized. PDF invoice generated and its hash anchored on-chain (tx ${finalizeReceipt.hash}).`,
+  });
 
   return {
     sessionId,

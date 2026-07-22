@@ -125,4 +125,20 @@ function renderInvoiceTable(container, invoice) {
   `;
 }
 
+// Keeps the "Open chat" link pointed at whatever session ID is currently
+// entered, instead of a static href — the chat page reads it back out of
+// its own URL.
+function wireChatLink() {
+  const link = el("chatLink");
+  const sessionInput = el("sessionId");
+  if (!link || !sessionInput) return;
+
+  const update = () => {
+    link.href = `chat-view.html?role=${link.dataset.chatRole}&session=${encodeURIComponent(sessionInput.value.trim())}`;
+  };
+  sessionInput.addEventListener("input", update);
+  update();
+}
+
 checkNetwork();
+wireChatLink();
