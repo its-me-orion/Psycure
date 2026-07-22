@@ -13,6 +13,7 @@ const {
   finalizeInvoice,
   viewInvoice,
 } = require("./psycureService");
+const { createConversation, sendMessage, listMessages } = require("./chatService");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -118,6 +119,44 @@ app.get(
   asyncRoute(async (req, res) => {
     const result = await viewInvoice({ sessionId: req.params.sessionId });
     res.json(result);
+  })
+);
+
+app.get(
+  "/api/chat/:sessionId",
+  asyncRoute(async (req, res) => {
+    const sessionId = req.params.sessionId;
+    createConversation({
+      sessionId,
+      patientId: "patient-1",
+      therapistId: "therapist-1",
+      patientAlias: "Patient",
+      therapistAlias: "Therapist",
+    });
+    res.json({ sessionId, messages: listMessages(sessionId) });
+  })
+);
+
+app.post(
+  "/api/chat/:sessionId",
+  asyncRoute(async (req, res) => {
+    const sessionId = req.params.sessionId;
+    const { senderRole, senderId, content } = req.body;
+
+    if (!senderRole || !senderId || !content) {
+      return res.status(400).json({ error: "senderRole, senderId and content are required" });
+    }
+
+    createConversation({
+      sessionId,
+      patientId: "patient-1",
+      therapistId: "therapist-1",
+      patientAlias: "Patient",
+      therapistAlias: "Therapist",
+    });
+
+    const message = sendMessage({ sessionId, senderRole, senderId, content });
+    res.json({ message });
   })
 );
 

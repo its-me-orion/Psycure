@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Psycure — Secure Chat</title>
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      .chat-shell { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+      .chat-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+      .chat-meta { color: var(--ink-soft); font-size: 13px; }
+      .chat-role-pill { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; padding: 4px 9px; border-radius: 999px; background: #dceae4; color: var(--teal-deep); }
+      .chat-window { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-height: 320px; max-height: 480px; overflow-y: auto; background: linear-gradient(180deg, #f8faf8 0%, #f2f7f2 100%); }
+      .chat-message { display: flex; }
+      .chat-message--mine { justify-content: flex-end; }
+      .chat-message--other { justify-content: flex-start; }
+      .chat-bubble { max-width: 78%; padding: 10px 12px; border-radius: 16px; border: 1px solid var(--line); background: white; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+      .chat-message--mine .chat-bubble { background: #dcf8c6; border-color: #c9e8aa; border-bottom-right-radius: 4px; }
+      .chat-message--other .chat-bubble { background: white; border-bottom-left-radius: 4px; }
+      .chat-bubble__meta { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ink-soft); margin-bottom: 6px; }
+      .chat-bubble__text { font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
+      .chat-empty { color: var(--ink-soft); font-size: 13px; padding: 8px 0; }
+      .chat-composer { display: flex; gap: 10px; margin-top: 14px; }
+      .chat-composer input { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="masthead">
+        <div>
+          <h1>Psycure <span class="role-tag role-tag--therapist">Secure Chat</span></h1>
+          <p class="masthead__sub">Messages are stored encrypted locally and shown here for the therapist/patient session.</p>
+        </div>
+      </header>
+
+      <section class="chat-shell">
+        <div class="chat-head">
+          <div class="chat-meta">Session: <strong id="sessionLabel">session-123</strong></div>
+          <div id="roleBadge" class="chat-role-pill">Patient view</div>
+        </div>
+        <div id="chatWindow" class="chat-window">
+          <p class="chat-empty">Loading messages…</p>
+        </div>
+        <div class="chat-composer">
+          <input id="chatInput" type="text" placeholder="Write a message..." />
+          <button id="sendBtn" class="primary-btn">Send</button>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const sessionId = 'session-123';
+      const params = new URLSearchParams(window.location.search);
+      const currentRole = params.get('role') === 'patient' ? 'patient' : 'therapist';
+      const senderId = currentRole === 'patient' ? 'patient-1' : 'therapist-1';
+      const roleBadge = document.getElementById('roleBadge');
+      roleBadge.textContent = currentRole === 'patient' ? 'Patient view' : 'Therapist view';
+
+      function formatTime(timestamp) {
+        return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      async function loadMessages() {
+        const response = await fetch(`/api/chat/${sessionId}`);
+        const data = await response.json();
+        const windowEl = document.getElementById('chatWindow');
+        if (!data.messages || data.messages.length === 0) {
+          windowEl.innerHTML = '<p class="chat-empty">No messages yet.</p>';
+          return;
+        }
+        windowEl.innerHTML = data.messages.map((message) => {
+          const mine = message.senderRole === currentRole;
+          const label = mine ? 'You' : (message.senderRole === 'patient' ? 'Patient' : 'Therapist');
+          return `
+            <div class="chat-message ${mine ? 'chat-message--mine' : 'chat-message--other'}">
+              <div class="chat-bubble">
+                <div class="chat-bubble__meta">
+                  <span>${label}</span>
+                  <span>${formatTime(message.createdAt)}</span>
+                </div>
+                <div class="chat-bubble__text">${message.content}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      async function sendMessage() {
+        const input = document.getElementById('chatInput');
+        if (!input.value.trim()) return;
+        await fetch(`/api/chat/${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ senderRole: currentRole, senderId, content: input.value })
+        });
+        input.value = '';
+        loadMessages();
+      }
+
+      document.getElementById('sendBtn').addEventListener('click', sendMessage);
+      window.addEventListener('load', loadMessages);
+    </script>
+  </body>
+</html>
