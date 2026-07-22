@@ -6,11 +6,18 @@
     <title>Psycure — Secure Chat</title>
     <link rel="stylesheet" href="style.css" />
     <style>
+      /* This page is its own self-contained "app" screen (not part of the
+         multi-step flow pages), so it fills the viewport exactly and only
+         the chat window itself scrolls — no outer page scrollbar. */
+      html, body.chat-page { height: 100%; overflow: hidden; }
+      body.chat-page .wrap { height: 100vh; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; }
+      body.chat-page .masthead { flex-shrink: 0; }
+      body.chat-page .chat-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
       .chat-shell { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
-      .chat-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+      .chat-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-shrink: 0; }
       .chat-meta { color: var(--ink-soft); font-size: 13px; }
-      .chat-role-pill { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; padding: 4px 9px; border-radius: 999px; background: #dceae4; color: var(--teal-deep); }
-      .chat-window { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-height: 320px; max-height: 480px; overflow-y: auto; background: linear-gradient(180deg, #f8faf8 0%, #f2f7f2 100%); }
+      .chat-window { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; overflow-y: auto; background: linear-gradient(180deg, #f8faf8 0%, #f2f7f2 100%); }
       .chat-message { display: flex; }
       .chat-message--mine { justify-content: flex-end; }
       .chat-message--other { justify-content: flex-start; }
@@ -20,11 +27,16 @@
       .chat-bubble__meta { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ink-soft); margin-bottom: 6px; }
       .chat-bubble__text { font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
       .chat-empty { color: var(--ink-soft); font-size: 13px; padding: 8px 0; }
-      .chat-composer { display: flex; gap: 10px; margin-top: 14px; }
+      .chat-composer { display: flex; gap: 10px; margin-top: 14px; flex-shrink: 0; }
       .chat-composer input { flex: 1; }
+      .chat-system { display: flex; justify-content: center; margin: 2px 0; }
+      .chat-system span { font-size: 11.5px; color: var(--ink-soft); background: var(--clay-soft); padding: 4px 10px; border-radius: 999px; text-align: center; }
+      .chat-system__time { margin-left: 6px; opacity: 0.65; font-size: 10px; }
     </style>
   </head>
   <body>
+    <div id="roleFlag" class="role-flag role-tag"></div>
+
     <div class="wrap">
       <header class="masthead">
         <div>
@@ -36,7 +48,6 @@
       <section class="chat-shell">
         <div class="chat-head">
           <div class="chat-meta">Session: <strong id="sessionLabel">session-123</strong></div>
-          <div id="roleBadge" class="chat-role-pill">Patient view</div>
         </div>
         <div id="chatWindow" class="chat-window">
           <p class="chat-empty">Loading messages…</p>
@@ -49,26 +60,41 @@
     </div>
 
     <script>
-      const sessionId = 'session-123';
       const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session') || 'S1';
       const currentRole = params.get('role') === 'patient' ? 'patient' : 'therapist';
       const senderId = currentRole === 'patient' ? 'patient-1' : 'therapist-1';
-      const roleBadge = document.getElementById('roleBadge');
-      roleBadge.textContent = currentRole === 'patient' ? 'Patient view' : 'Therapist view';
+      document.body.classList.add('chat-page', currentRole === 'patient' ? 'role-patient' : 'role-therapist');
+      const roleFlag = document.getElementById('roleFlag');
+      roleFlag.classList.add(currentRole === 'patient' ? 'role-tag--patient' : 'role-tag--therapist');
+      roleFlag.textContent = currentRole === 'patient' ? 'Patient view' : 'Therapist view';
+      document.getElementById('sessionLabel').textContent = sessionId;
 
       function formatTime(timestamp) {
         return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      // Only auto-scroll to the newest message if the reader was already at
+      // (or near) the bottom — otherwise the 1s poll below would keep
+      // yanking them back down while they're reading older history.
+      function isNearBottom(el) {
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       }
 
       async function loadMessages() {
         const response = await fetch(`/api/chat/${sessionId}`);
         const data = await response.json();
         const windowEl = document.getElementById('chatWindow');
+        const shouldStick = isNearBottom(windowEl);
+
         if (!data.messages || data.messages.length === 0) {
           windowEl.innerHTML = '<p class="chat-empty">No messages yet.</p>';
           return;
         }
         windowEl.innerHTML = data.messages.map((message) => {
+          if (message.senderRole === 'system') {
+            return `<div class="chat-system"><span>${message.content}<span class="chat-system__time">${formatTime(message.createdAt)}</span></span></div>`;
+          }
           const mine = message.senderRole === currentRole;
           const label = mine ? 'You' : (message.senderRole === 'patient' ? 'Patient' : 'Therapist');
           return `
@@ -83,6 +109,10 @@
             </div>
           `;
         }).join('');
+
+        if (shouldStick) {
+          windowEl.scrollTop = windowEl.scrollHeight;
+        }
       }
 
       async function sendMessage() {
@@ -98,7 +128,11 @@
       }
 
       document.getElementById('sendBtn').addEventListener('click', sendMessage);
+      document.getElementById('chatInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendMessage();
+      });
       window.addEventListener('load', loadMessages);
+      setInterval(loadMessages, 1000);
     </script>
   </body>
 </html>

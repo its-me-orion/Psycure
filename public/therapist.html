@@ -8,7 +8,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="role-therapist">
+
+<div class="role-flag role-tag role-tag--therapist">Therapist view</div>
 
 <div class="wrap">
 
@@ -37,6 +39,7 @@
         <label for="sessionId">Session ID</label>
         <input id="sessionId" type="text" value="S1" spellcheck="false" />
         <button id="loadSessionBtn" class="ghost-btn">Load status</button>
+        <a href="chat-view.html?role=therapist" id="chatLink" data-chat-role="therapist" class="ghost-btn">Open chat</a>
       </div>
 
       <!-- STEP 1 -->
@@ -116,19 +119,6 @@
           <div id="invoiceResult" class="invoice-result invoice-result--empty">
             No invoice finalized yet for this session.
           </div>
-        </div>
-      </article>
-
-      <article class="step" data-step="4">
-        <div class="step__head">
-          <span class="step__num">04</span>
-          <div>
-            <h2>Secure chat</h2>
-            <p>Open the private conversation for this session and continue the care coordination.</p>
-          </div>
-        </div>
-        <div class="step__body">
-          <a href="chat-view.html?role=therapist" class="secondary-btn" style="display:inline-block; text-decoration:none;">Open chat</a>
         </div>
       </article>
 
