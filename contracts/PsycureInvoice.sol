@@ -2,14 +2,16 @@
 pragma solidity ^0.8.24;
 
 /// @title PsycureInvoice
-/// @notice Records patient/therapist/insurer HCS confirmations for a session and
-///         finalizes an invoice split (franchise + co-pay, Swiss KVG-style) only
-///         once all three parties have confirmed the *exact same* terms. The
-///         terms each party confirmed are committed as a hash at confirmation
-///         time, and finalize() re-derives that hash from its own parameters and
-///         requires an exact match — so the platform (owner) cannot finalize
-///         different numbers than what patient, therapist and insurer actually
-///         agreed to.
+/// @notice Records patient/therapist/insurer HCS confirmations and patient/therapist
+///         attendance attestations for a session, and finalizes an invoice split
+///         (franchise + co-pay, Swiss KVG-style) only once all three parties have
+///         confirmed the *exact same* terms AND both patient and therapist have
+///         attested they actually attended the session. The terms each party
+///         confirmed are committed as a hash at confirmation time, and finalize()
+///         re-derives that hash from its own parameters and requires an exact
+///         match — so the platform (owner) cannot finalize different numbers than
+///         what patient, therapist and insurer actually agreed to, and cannot
+///         settle a session nobody attested to attending.
 contract PsycureInvoice {
     // Role codes used by recordHcsConfirmation / HcsConfirmationRecorded.
     uint8 public constant ROLE_PATIENT = 0;
@@ -20,6 +22,8 @@ contract PsycureInvoice {
         bool patientConfirmed;
         bool therapistConfirmed;
         bool insurerConfirmed;
+        bool patientAttended;
+        bool therapistAttended;
         bool finalized;
         uint256 sessionRate;
         uint256 franchiseRemaining;
@@ -32,6 +36,8 @@ contract PsycureInvoice {
         string patientHcsMessageId;
         string therapistHcsMessageId;
         string insurerHcsMessageId;
+        string patientAttendanceHcsMessageId;
+        string therapistAttendanceHcsMessageId;
         bytes32 patientTermsHash;
         bytes32 therapistTermsHash;
         bytes32 insurerTermsHash;
@@ -48,6 +54,7 @@ contract PsycureInvoice {
         string hcsMessageId,
         bytes32 termsHash
     );
+    event AttendanceRecorded(bytes32 indexed sessionId, uint8 indexed role, string hcsMessageId);
     event InvoiceFinalized(
         bytes32 indexed sessionId,
         uint256 sessionRate,
@@ -114,12 +121,36 @@ contract PsycureInvoice {
         emit HcsConfirmationRecorded(sessionId, role, hcsMessageId, termsHash);
     }
 
+    /// @param role Must be ROLE_PATIENT or ROLE_THERAPIST — the insurer does not
+    ///        attend a session, so it is not a valid attendance role.
+    function recordAttendance(
+        bytes32 sessionId,
+        uint8 role,
+        string calldata hcsMessageId
+    ) external onlyOwner {
+        require(role == ROLE_PATIENT || role == ROLE_THERAPIST, "Invalid attendance role");
+
+        SessionInvoice storage invoice = invoices[sessionId];
+        require(!invoice.finalized, "Already finalized");
+
+        if (role == ROLE_PATIENT) {
+            invoice.patientAttended = true;
+            invoice.patientAttendanceHcsMessageId = hcsMessageId;
+        } else {
+            invoice.therapistAttended = true;
+            invoice.therapistAttendanceHcsMessageId = hcsMessageId;
+        }
+        emit AttendanceRecorded(sessionId, role, hcsMessageId);
+    }
+
     function canFinalize(bytes32 sessionId) external view returns (bool) {
         SessionInvoice storage invoice = invoices[sessionId];
         return
             invoice.patientConfirmed &&
             invoice.therapistConfirmed &&
             invoice.insurerConfirmed &&
+            invoice.patientAttended &&
+            invoice.therapistAttended &&
             !invoice.finalized &&
             invoice.patientTermsHash == invoice.therapistTermsHash &&
             invoice.patientTermsHash == invoice.insurerTermsHash;
@@ -137,6 +168,7 @@ contract PsycureInvoice {
             invoice.patientConfirmed && invoice.therapistConfirmed && invoice.insurerConfirmed,
             "Need all three confirmations"
         );
+        require(invoice.patientAttended && invoice.therapistAttended, "Both parties must have attended");
         require(!invoice.finalized, "Already finalized");
         require(copayBps <= 10_000, "Copay too high");
         require(platformFeeBps <= 10_000, "Fee too high");

@@ -21,7 +21,7 @@
     </a>
     <div>
       <h1>Psycure <span class="role-tag role-tag--patient">Patient</span></h1>
-      <p class="masthead__sub">Look up your session, wait for your insurer's terms, preview your cost, then confirm.</p>
+      <p class="masthead__sub">Look up your session, review your cost, confirm, then attest attendance after the session.</p>
     </div>
     <div class="masthead__net">
       <span class="dot" id="netDot"></span>
@@ -77,7 +77,7 @@
           <span class="step__num">03</span>
           <div>
             <h2>Confirm</h2>
-            <p>This submits your confirmation — mirroring your insurer's published terms — to HCS. Your therapist must confirm the same terms before the invoice can be finalized.</p>
+            <p>This submits your confirmation — mirroring your insurer's published terms — to HCS, before the session takes place. Your therapist must confirm the same terms too.</p>
           </div>
           <button id="reloadStatusBtn" class="icon-btn" type="button" title="Refresh confirmation status" aria-label="Refresh confirmation status">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
@@ -93,6 +93,24 @@
       <article class="step" data-step="4">
         <div class="step__head">
           <span class="step__num">04</span>
+          <div>
+            <h2>Confirm you attended</h2>
+            <p>After the session takes place — a separate record from agreeing to the cost. Required before your therapist can finalize the invoice.</p>
+          </div>
+          <button id="reloadAttendanceBtn" class="icon-btn" type="button" title="Refresh attendance status" aria-label="Refresh attendance status">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+        </div>
+        <div class="step__body">
+          <button id="attendBtn" class="primary-btn" disabled>I attended this session</button>
+          <div id="attendanceBox" class="terms-box terms-box--empty">Load a session first.</div>
+        </div>
+      </article>
+
+      <!-- STEP 5 -->
+      <article class="step" data-step="5">
+        <div class="step__head">
+          <span class="step__num">05</span>
           <div>
             <h2>Invoice status</h2>
             <p>Once your therapist finalizes, the result appears here.</p>

@@ -1,4 +1,5 @@
 let loadedInsurerTerms = null; // { sessionRate, franchiseRemaining, copayBps, platformFeeBps, termsHash } in rappen/bps
+let therapistAttendedLocally = false; // set immediately on successful attend — the mirror node lags a few seconds behind
 
 // ---------- Step 1: create session ----------
 el("createBtn").addEventListener("click", async () => {
@@ -31,6 +32,8 @@ el("createBtn").addEventListener("click", async () => {
 });
 
 // ---------- Step 2: load insurer's published terms ----------
+// Independent of attendance — you can agree to the price before the session
+// takes place.
 async function loadInsurerTerms() {
   const sessionId = currentSessionId();
   const box = el("patientTermsBox");
@@ -39,6 +42,7 @@ async function loadInsurerTerms() {
     if (!status.insurerConfirmed) {
       box.className = "terms-box terms-box--empty";
       box.textContent = "Insurer has not published terms yet.";
+      loadedInsurerTerms = null;
       el("confirmBtn").disabled = true;
       return;
     }
@@ -87,7 +91,6 @@ el("confirmBtn").addEventListener("click", async () => {
       title: "SESSION_CONFIRMED · therapist",
       meta: `hash ${result.termsHash}`,
     });
-    el("finalizeBtn").disabled = false;
   } catch (err) {
     pendingEntry.remove();
     addLedgerEntry({ title: "Therapist confirmation failed", meta: err.message, status: "error" });
@@ -96,9 +99,64 @@ el("confirmBtn").addEventListener("click", async () => {
   }
 });
 
-// ---------- Step 3: finalize ----------
+// ---------- Step 3: confirm attendance ----------
+// Independent of step 2 — happens after the session actually takes place.
+el("attendBtn").addEventListener("click", async () => {
+  const sessionId = currentSessionId();
+  const btn = el("attendBtn");
+  btn.disabled = true;
+  const pendingEntry = addLedgerEntry({ title: "Submitting attendance attestation…", status: "pending" });
+  try {
+    await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/attend`, { role: "therapist" });
+    pendingEntry.remove();
+    addLedgerEntry({ title: "SESSION_ATTENDED · therapist" });
+
+    // We know we just attested — show that immediately rather than waiting on
+    // the mirror node, which can take a few seconds to index the new message.
+    therapistAttendedLocally = true;
+    renderAttendance(true);
+  } catch (err) {
+    pendingEntry.remove();
+    addLedgerEntry({ title: "Attendance attestation failed", meta: err.message, status: "error" });
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function renderAttendance(attended) {
+  const box = el("attendanceBox");
+  if (attended) {
+    box.className = "terms-box";
+    box.innerHTML = `<div class="terms-box__row"><span>Status</span><strong>Attended — attested to HCS</strong></div>`;
+  } else {
+    box.className = "terms-box terms-box--empty";
+    box.textContent = "Not attested yet.";
+  }
+}
+
+async function refreshAttendance() {
+  const sessionId = currentSessionId();
+  try {
+    const status = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/confirmations`);
+    // OR in our own local attestation — the mirror node may not have indexed
+    // our attend yet, but we know it went through.
+    renderAttendance(status.therapistAttended || therapistAttendedLocally);
+  } catch {
+    // no activity yet — fine
+  }
+}
+
+// ---------- Step 4: finalize ----------
+// This button is deliberately always enabled — clicking it with mismatched
+// terms or missing attendance sends a real transaction that the *contract*
+// rejects (PsycureInvoice.sol's own requires), rather than being silently
+// blocked by this page. That's the point for a PoC demo: it proves the
+// smart contract enforces these rules, not just the frontend.
 el("finalizeBtn").addEventListener("click", async () => {
-  if (!loadedInsurerTerms) return;
+  if (!loadedInsurerTerms) {
+    addLedgerEntry({ title: "Load insurer's terms first — nothing to finalize yet", status: "error" });
+    return;
+  }
   const sessionId = currentSessionId();
   const btn = el("finalizeBtn");
   btn.disabled = true;
@@ -123,13 +181,13 @@ el("finalizeBtn").addEventListener("click", async () => {
 });
 
 // ---------- Load status ----------
+// Purely informational now — finalizeBtn is never disabled based on this
+// (see the note on the finalize handler above), but refreshing status here
+// still keeps the invoice box and attendance box up to date.
 async function refreshFinalizeStatus() {
   const sessionId = currentSessionId();
+  await refreshAttendance();
   try {
-    const status = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/confirmations`);
-    if (status.patientConfirmed && status.therapistConfirmed && status.insurerConfirmed) {
-      el("finalizeBtn").disabled = !status.termsMatch;
-    }
     const invoice = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/invoice`);
     renderInvoiceTable(el("invoiceResult"), invoice);
   } catch {
@@ -139,3 +197,4 @@ async function refreshFinalizeStatus() {
 
 el("loadSessionBtn").addEventListener("click", refreshFinalizeStatus);
 el("reloadFinalizeStatusBtn").addEventListener("click", withSpin(el("reloadFinalizeStatusBtn"), refreshFinalizeStatus));
+el("reloadAttendanceBtn").addEventListener("click", withSpin(el("reloadAttendanceBtn"), refreshAttendance));

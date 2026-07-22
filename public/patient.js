@@ -1,5 +1,6 @@
 let loadedSessionTerms = null; // { sessionRate } in rappen, from HCS
 let insurerTerms = null; // { franchiseRemaining, copayBps, platformFeeBps, termsHash } from the insurer's confirmation
+let patientAttendedLocally = false; // set immediately on successful attend — the mirror node lags a few seconds behind
 let patientConfirmedLocally = false; // set immediately on successful confirm — the mirror node lags a few seconds behind
 
 // ---------- Step 1: load session ----------
@@ -18,7 +19,9 @@ el("loadSessionBtn").addEventListener("click", async () => {
     `;
     addLedgerEntry({ title: `Loaded session ${sessionId}`, meta: `rate CHF ${rappenToChf(terms.sessionRate)}` });
 
+    el("attendBtn").disabled = false;
     await loadInsurerTerms();
+    await refreshAttendance();
   } catch (err) {
     box.className = "terms-box terms-box--empty";
     box.textContent = "Could not load this session — check the Session ID with your therapist.";
@@ -40,6 +43,7 @@ async function loadInsurerTerms() {
       termsBox.textContent = "Waiting for your insurer to publish your franchise remaining & co-pay terms.";
       previewBox.className = "invoice-result invoice-result--empty";
       previewBox.textContent = "Your cost breakdown will appear here once your insurer has published terms.";
+      insurerTerms = null;
       el("confirmBtn").disabled = true;
       return;
     }
@@ -79,6 +83,8 @@ async function loadInsurerTerms() {
 }
 
 // ---------- Step 3: confirm ----------
+// This can happen before the session even takes place — you're agreeing to a
+// price, not attesting attendance (that's a separate step below).
 el("confirmBtn").addEventListener("click", async () => {
   if (!insurerTerms) return;
   const sessionId = currentSessionId();
@@ -109,17 +115,6 @@ el("confirmBtn").addEventListener("click", async () => {
   }
 });
 
-// ---------- Step 4: view invoice ----------
-el("viewBtn").addEventListener("click", async () => {
-  const sessionId = currentSessionId();
-  try {
-    const invoice = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/invoice`);
-    renderInvoiceTable(el("invoiceResult"), invoice);
-  } catch (err) {
-    addLedgerEntry({ title: "View invoice failed", meta: err.message, status: "error" });
-  }
-});
-
 function renderStatus(patientConfirmed, therapistConfirmed) {
   if (!patientConfirmed) return;
   el("statusBox").className = "terms-box";
@@ -140,6 +135,67 @@ async function refreshStatus() {
   }
 }
 
+// ---------- Step 4: confirm attendance ----------
+// Independent of step 3 — happens after the session actually takes place.
+// Your therapist can't finalize the invoice until both of you have attested.
+el("attendBtn").addEventListener("click", async () => {
+  if (!loadedSessionTerms) return;
+  const sessionId = currentSessionId();
+  const btn = el("attendBtn");
+  btn.disabled = true;
+  const pendingEntry = addLedgerEntry({ title: "Submitting attendance attestation…", status: "pending" });
+  try {
+    await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/attend`, { role: "patient" });
+    pendingEntry.remove();
+    addLedgerEntry({ title: "SESSION_ATTENDED · patient" });
+
+    // We know we just attested — show that immediately rather than waiting on
+    // the mirror node, which can take a few seconds to index the new message.
+    patientAttendedLocally = true;
+    renderAttendance(true);
+  } catch (err) {
+    pendingEntry.remove();
+    addLedgerEntry({ title: "Attendance attestation failed", meta: err.message, status: "error" });
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function renderAttendance(attended) {
+  const box = el("attendanceBox");
+  if (attended) {
+    box.className = "terms-box";
+    box.innerHTML = `<div class="terms-box__row"><span>Status</span><strong>Attended — attested to HCS</strong></div>`;
+  } else if (loadedSessionTerms) {
+    box.className = "terms-box terms-box--empty";
+    box.textContent = "Not attested yet.";
+  }
+}
+
+async function refreshAttendance() {
+  const sessionId = currentSessionId();
+  try {
+    const status = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/confirmations`);
+    // OR in our own local attestation — the mirror node may not have indexed
+    // our attend yet, but we know it went through.
+    renderAttendance(status.patientAttended || patientAttendedLocally);
+  } catch {
+    // no activity yet — fine
+  }
+}
+
+// ---------- Step 5: view invoice ----------
+el("viewBtn").addEventListener("click", async () => {
+  const sessionId = currentSessionId();
+  try {
+    const invoice = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/invoice`);
+    renderInvoiceTable(el("invoiceResult"), invoice);
+  } catch (err) {
+    addLedgerEntry({ title: "View invoice failed", meta: err.message, status: "error" });
+  }
+});
+
 // ---------- Reload icons ----------
 el("reloadInsurerTermsBtn").addEventListener("click", withSpin(el("reloadInsurerTermsBtn"), loadInsurerTerms));
 el("reloadStatusBtn").addEventListener("click", withSpin(el("reloadStatusBtn"), refreshStatus));
+el("reloadAttendanceBtn").addEventListener("click", withSpin(el("reloadAttendanceBtn"), refreshAttendance));

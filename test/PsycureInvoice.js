@@ -20,7 +20,7 @@ describe("PsycureInvoice", function () {
     return contract;
   }
 
-  it("finalizes invoice only after all three HCS confirmations", async function () {
+  it("finalizes invoice only after all three HCS confirmations AND both attendances", async function () {
     const contract = await deployFixture();
     const sessionId = ethers.keccak256(ethers.toUtf8Bytes("session-001"));
     const hash = termsHash(20_000, 5_000, 1_000, 100);
@@ -38,6 +38,20 @@ describe("PsycureInvoice", function () {
 
     await contract.recordHcsConfirmation(sessionId, ROLE_INSURER, "0.0.12345@13", hash);
 
+    // All three confirmed, but nobody has attested attendance yet.
+    await expect(contract.finalizeInvoice(sessionId, 20_000, 5_000, 1_000, 100)).to.be.revertedWith(
+      "Both parties must have attended"
+    );
+
+    await contract.recordAttendance(sessionId, ROLE_PATIENT, "0.0.12345@14");
+
+    // Only the patient has attested so far.
+    await expect(contract.finalizeInvoice(sessionId, 20_000, 5_000, 1_000, 100)).to.be.revertedWith(
+      "Both parties must have attended"
+    );
+
+    await contract.recordAttendance(sessionId, ROLE_THERAPIST, "0.0.12345@15");
+
     await expect(contract.finalizeInvoice(sessionId, 20_000, 5_000, 1_000, 100))
       .to.emit(contract, "InvoiceFinalized")
       .withArgs(sessionId, 20_000, 6_500, 13_500, 200, 19_800);
@@ -52,6 +66,10 @@ describe("PsycureInvoice", function () {
     expect(invoice.patientHcsMessageId).to.equal("0.0.12345@11");
     expect(invoice.therapistHcsMessageId).to.equal("0.0.12345@12");
     expect(invoice.insurerHcsMessageId).to.equal("0.0.12345@13");
+    expect(invoice.patientAttended).to.equal(true);
+    expect(invoice.therapistAttended).to.equal(true);
+    expect(invoice.patientAttendanceHcsMessageId).to.equal("0.0.12345@14");
+    expect(invoice.therapistAttendanceHcsMessageId).to.equal("0.0.12345@15");
   });
 
   it("supports a custom platform fee agreed by all three parties", async function () {
@@ -62,6 +80,8 @@ describe("PsycureInvoice", function () {
     await contract.recordHcsConfirmation(sessionId, ROLE_PATIENT, "0.0.12345@21", hash);
     await contract.recordHcsConfirmation(sessionId, ROLE_THERAPIST, "0.0.12345@22", hash);
     await contract.recordHcsConfirmation(sessionId, ROLE_INSURER, "0.0.12345@23", hash);
+    await contract.recordAttendance(sessionId, ROLE_PATIENT, "0.0.12345@24");
+    await contract.recordAttendance(sessionId, ROLE_THERAPIST, "0.0.12345@25");
 
     await contract.finalizeInvoice(sessionId, 15_000, 0, 1_000, 250);
 
@@ -86,6 +106,8 @@ describe("PsycureInvoice", function () {
     await contract.recordHcsConfirmation(sessionId, ROLE_PATIENT, "0.0.12345@31", patientHash);
     await contract.recordHcsConfirmation(sessionId, ROLE_THERAPIST, "0.0.12345@32", therapistHash);
     await contract.recordHcsConfirmation(sessionId, ROLE_INSURER, "0.0.12345@33", patientHash);
+    await contract.recordAttendance(sessionId, ROLE_PATIENT, "0.0.12345@31a");
+    await contract.recordAttendance(sessionId, ROLE_THERAPIST, "0.0.12345@32a");
 
     await expect(contract.finalizeInvoice(sessionId, 20_000, 5_000, 1_000, 100)).to.be.revertedWith(
       "Terms mismatch between parties"
@@ -103,6 +125,8 @@ describe("PsycureInvoice", function () {
     await contract.recordHcsConfirmation(sessionId, ROLE_PATIENT, "0.0.12345@34", agreedHash);
     await contract.recordHcsConfirmation(sessionId, ROLE_THERAPIST, "0.0.12345@35", agreedHash);
     await contract.recordHcsConfirmation(sessionId, ROLE_INSURER, "0.0.12345@36", insurerHash);
+    await contract.recordAttendance(sessionId, ROLE_PATIENT, "0.0.12345@34a");
+    await contract.recordAttendance(sessionId, ROLE_THERAPIST, "0.0.12345@35a");
 
     await expect(contract.finalizeInvoice(sessionId, 20_000, 5_000, 1_000, 100)).to.be.revertedWith(
       "Terms mismatch between parties"
@@ -118,6 +142,8 @@ describe("PsycureInvoice", function () {
     await contract.recordHcsConfirmation(sessionId, ROLE_PATIENT, "0.0.12345@41", agreedHash);
     await contract.recordHcsConfirmation(sessionId, ROLE_THERAPIST, "0.0.12345@42", agreedHash);
     await contract.recordHcsConfirmation(sessionId, ROLE_INSURER, "0.0.12345@43", agreedHash);
+    await contract.recordAttendance(sessionId, ROLE_PATIENT, "0.0.12345@41a");
+    await contract.recordAttendance(sessionId, ROLE_THERAPIST, "0.0.12345@42a");
 
     // ...but finalize is attempted with a different session rate than what was hashed.
     await expect(contract.finalizeInvoice(sessionId, 99_000, 5_000, 1_000, 100)).to.be.revertedWith(
@@ -142,6 +168,15 @@ describe("PsycureInvoice", function () {
     await expect(
       contract.recordHcsConfirmation(sessionId, 3, "0.0.12345@61", hash)
     ).to.be.revertedWith("Invalid role");
+  });
+
+  it("rejects an insurer attendance attestation (only patient/therapist can attend)", async function () {
+    const contract = await deployFixture();
+    const sessionId = ethers.keccak256(ethers.toUtf8Bytes("session-007"));
+
+    await expect(
+      contract.recordAttendance(sessionId, ROLE_INSURER, "0.0.12345@71")
+    ).to.be.revertedWith("Invalid attendance role");
   });
 
   it("computeTermsHash matches ethers.solidityPackedKeccak256 off-chain", async function () {
