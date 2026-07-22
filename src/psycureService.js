@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const { ethers } = require("ethers");
+const PDFDocument = require("pdfkit");
 const {
   buildHederaClient,
   ensureTopicId,
@@ -14,8 +15,8 @@ const ROLE_CODES = { patient: 0, therapist: 1, insurer: 2 };
 const INVOICE_ABI = [
   "function recordHcsConfirmation(bytes32 sessionId, uint8 role, string hcsMessageId, bytes32 termsHash) external",
   "function recordAttendance(bytes32 sessionId, uint8 role, string hcsMessageId) external",
-  "function finalizeInvoice(bytes32 sessionId, uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external",
-  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool insurerConfirmed,bool patientAttended,bool therapistAttended,bool finalized,uint256 sessionRate,uint256 franchiseRemaining,uint16 copayBps,uint16 platformFeeBps,uint256 patientAmount,uint256 insurerAmount,uint256 platformFeeAmount,uint256 therapistPayout,string patientHcsMessageId,string therapistHcsMessageId,string insurerHcsMessageId,string patientAttendanceHcsMessageId,string therapistAttendanceHcsMessageId,bytes32 patientTermsHash,bytes32 therapistTermsHash,bytes32 insurerTermsHash))",
+  "function finalizeInvoice(bytes32 sessionId, bytes32 invoiceHash) external",
+  "function getInvoice(bytes32 sessionId) external view returns ((bool patientConfirmed,bool therapistConfirmed,bool insurerConfirmed,bool patientAttended,bool therapistAttended,bool finalized,string patientHcsMessageId,string therapistHcsMessageId,string insurerHcsMessageId,string patientAttendanceHcsMessageId,string therapistAttendanceHcsMessageId,bytes32 patientTermsHash,bytes32 therapistTermsHash,bytes32 insurerTermsHash,bytes32 invoiceHash))",
   "function defaultPlatformFeeBps() external view returns (uint16)",
   "function computeTermsHash(uint256 sessionRate, uint256 franchiseRemaining, uint16 copayBps, uint16 platformFeeBps) external pure returns (bytes32)",
 ];
@@ -281,6 +282,137 @@ async function getConfirmationStatus({ sessionId }) {
 }
 
 /**
+ * Gathers everything needed to render or re-verify a session's invoice: the
+ * session metadata from SESSION_CREATED, the confirmed financial terms (the
+ * insurer is the authoritative source — patient/therapist only ever mirror
+ * its exact hash, so any of the three confirmations has identical figures),
+ * and the resulting split via the same previewSplit() math used for the
+ * live preview during confirmation. This is the single source of truth for
+ * "what does this invoice actually say" now that the contract itself no
+ * longer computes or stores it.
+ */
+async function getFinalizedInvoiceData({ sessionId }) {
+  const topicId = process.env.HEDERA_TOPIC_ID;
+  if (!topicId) {
+    throw new Error("Missing HEDERA_TOPIC_ID environment variable");
+  }
+
+  const [created, activity] = await Promise.all([
+    fetchSessionCreated(topicId, sessionId),
+    fetchSessionActivity(topicId, sessionId),
+  ]);
+
+  if (!created) {
+    throw new Error(`No SESSION_CREATED message found for session ${sessionId}`);
+  }
+  if (!activity.insurerConfirmation) {
+    throw new Error(`No insurer SESSION_CONFIRMED message found for session ${sessionId}`);
+  }
+
+  const terms = activity.insurerConfirmation.payload;
+  const split = previewSplit({
+    sessionRate: terms.sessionRate,
+    franchiseRemaining: terms.franchiseRemaining,
+    copayBps: terms.copayBps,
+    platformFeeBps: terms.platformFeeBps,
+  });
+
+  return {
+    sessionId,
+    date: created.payload.date,
+    startTime: created.payload.startTime,
+    endTime: created.payload.endTime,
+    patient: created.payload.patient,
+    therapist: created.payload.therapist,
+    insurer: created.payload.insurer,
+    sessionRate: terms.sessionRate,
+    franchiseRemaining: terms.franchiseRemaining,
+    copayBps: Number(terms.copayBps),
+    platformFeeBps: Number(terms.platformFeeBps),
+    ...split,
+  };
+}
+
+/**
+ * Renders the human-facing invoice as a PDF — CHF amounts, dates and aliases
+ * only, no hex hashes or HCS message IDs in the body. Deliberately
+ * deterministic (no "generated at" timestamp) so the same finalized session
+ * always produces byte-identical output: that's what lets the on-chain
+ * invoiceHash be re-verified later by simply regenerating and re-hashing.
+ */
+async function generateInvoicePdf({ sessionId }) {
+  const data = await getFinalizedInvoiceData({ sessionId });
+  const sessionHash = toSessionHash(sessionId);
+
+  // pdfkit requires a real Date for its internal file-ID generation — using
+  // "now" would make regenerated output non-deterministic (different hash
+  // every time), so this pins it to the session's own date instead, which is
+  // itself immutable HCS data. Same session in -> same PDF bytes out, always.
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 56,
+    info: { CreationDate: new Date(`${data.date}T00:00:00Z`) },
+  });
+
+  const chunks = [];
+  doc.on("data", (chunk) => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  const chf = (rappen) => `CHF ${(Number(rappen) / 100).toFixed(2)}`;
+  const pct = (bps) => `${(Number(bps) / 100).toFixed(2)}%`;
+
+  doc.fontSize(20).text("Psycure - Session Invoice", { align: "left" });
+  doc.moveDown(0.5);
+  doc.fontSize(10).fillColor("#55655F").text(`Session ${data.sessionId}`);
+  doc.fillColor("#000000");
+  doc.moveDown(1.2);
+
+  doc.fontSize(12).text(`Date: ${data.date}    Time: ${data.startTime} - ${data.endTime}`);
+  doc.moveDown(0.6);
+  doc.text(`Patient: ${data.patient}`);
+  doc.text(`Therapist: ${data.therapist}`);
+  doc.text(`Insurer: ${data.insurer}`);
+  doc.moveDown(1);
+
+  doc.moveTo(56, doc.y).lineTo(539, doc.y).strokeColor("#D7DED3").stroke();
+  doc.moveDown(1);
+
+  doc.fontSize(13).text("Terms", { underline: true });
+  doc.moveDown(0.4);
+  doc.fontSize(12);
+  doc.text(`Session rate: ${chf(data.sessionRate)}`);
+  doc.text(`Franchise remaining: ${chf(data.franchiseRemaining)}`);
+  doc.text(`Co-pay: ${pct(data.copayBps)}`);
+  doc.text(`Platform fee: ${pct(data.platformFeeBps)}`);
+  doc.moveDown(1);
+
+  doc.fontSize(13).text("Settlement", { underline: true });
+  doc.moveDown(0.4);
+  doc.fontSize(12);
+  doc.text(`Patient pays: ${chf(data.patientAmount)}`);
+  doc.text(`Insurer pays: ${chf(data.insurerAmount)}`);
+  doc.text(`Platform fee amount: ${chf(data.platformFeeAmount)}`);
+  doc.font("Helvetica-Bold").text(`Therapist payout: ${chf(data.therapistPayout)}`);
+  doc.font("Helvetica");
+  doc.moveDown(1.5);
+
+  doc.moveTo(56, doc.y).lineTo(539, doc.y).strokeColor("#D7DED3").stroke();
+  doc.moveDown(0.8);
+  doc.fontSize(8).fillColor("#55655F");
+  doc.text(
+    "This invoice is anchored on Hedera testnet: the smart contract records a hash of this exact " +
+      "document once all three parties confirmed matching terms and both patient and therapist " +
+      `attested attendance. Session hash: ${sessionHash}`
+  );
+
+  doc.end();
+  return done;
+}
+
+/**
  * Step 5 — Records whatever confirmations and attendance attestations exist
  * for this session on-chain, then attempts to finalize.
  *
@@ -296,9 +428,11 @@ async function getConfirmationStatus({ sessionId }) {
  *
  * The only things still checked here are structural, not business-rule:
  * patient/therapist/insurer confirmations must actually exist, because
- * without them there's no termsHash to record on-chain at all.
+ * without them there's no termsHash to record on-chain at all. The invoice
+ * itself — the actual CHF split — is computed and rendered off-chain as a
+ * PDF (see generateInvoicePdf); only a hash of that PDF is sent on-chain.
  */
-async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, copayBps, platformFeeBps }) {
+async function finalizeInvoice({ sessionId }) {
   const topicId = process.env.HEDERA_TOPIC_ID;
   if (!topicId) {
     throw new Error("Missing HEDERA_TOPIC_ID environment variable");
@@ -349,13 +483,12 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     await (await contract.recordAttendance(sessionHash, ROLE_CODES.therapist, therapistAttendanceMessageId)).wait();
   }
 
-  const finalizeTx = await contract.finalizeInvoice(
-    sessionHash,
-    BigInt(sessionRate),
-    BigInt(franchiseRemaining),
-    Number(copayBps),
-    Number(platformFeeBps)
-  );
+  // Generate the invoice PDF from the same confirmed terms just recorded
+  // above, and anchor only its hash on-chain.
+  const pdfBuffer = await generateInvoicePdf({ sessionId });
+  const invoiceHash = ethers.keccak256(pdfBuffer);
+
+  const finalizeTx = await contract.finalizeInvoice(sessionHash, invoiceHash);
   const finalizeReceipt = await finalizeTx.wait();
 
   return {
@@ -368,11 +501,19 @@ async function finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, cop
     patientAttendanceMessageId,
     therapistAttendanceMessageId,
     termsHash: patientHash,
+    invoiceHash,
   };
 }
 
 /**
- * Reads the finalized (or in-progress) invoice state from the contract.
+ * Reads the finalized (or in-progress) invoice state from the contract. The
+ * contract itself only ever stores confirmation/attendance flags, message
+ * IDs, terms hashes and the invoiceHash — no raw CHF figures. If the session
+ * is finalized, this also recomputes the split off-chain (the same path
+ * generateInvoicePdf uses) purely so the browser UI can keep showing an
+ * inline CHF summary, and verifies it against the on-chain invoiceHash by
+ * regenerating the PDF and re-hashing it — a genuine tamper-evidence check,
+ * not just a display convenience.
  */
 async function viewInvoice({ sessionId }) {
   const contract = getContract();
@@ -380,7 +521,7 @@ async function viewInvoice({ sessionId }) {
   const invoiceResult = await contract.getInvoice(sessionHash);
   const invoice = invoiceResult.finalized !== undefined ? invoiceResult : invoiceResult[0];
 
-  return {
+  const result = {
     sessionId,
     sessionHash,
     patientConfirmed: invoice.patientConfirmed,
@@ -389,14 +530,6 @@ async function viewInvoice({ sessionId }) {
     patientAttended: invoice.patientAttended,
     therapistAttended: invoice.therapistAttended,
     finalized: invoice.finalized,
-    sessionRate: invoice.sessionRate.toString(),
-    franchiseRemaining: invoice.franchiseRemaining.toString(),
-    copayBps: Number(invoice.copayBps),
-    platformFeeBps: Number(invoice.platformFeeBps),
-    patientAmount: invoice.patientAmount.toString(),
-    insurerAmount: invoice.insurerAmount.toString(),
-    platformFeeAmount: invoice.platformFeeAmount.toString(),
-    therapistPayout: invoice.therapistPayout.toString(),
     patientHcsMessageId: invoice.patientHcsMessageId,
     therapistHcsMessageId: invoice.therapistHcsMessageId,
     insurerHcsMessageId: invoice.insurerHcsMessageId,
@@ -405,7 +538,26 @@ async function viewInvoice({ sessionId }) {
     patientTermsHash: invoice.patientTermsHash,
     therapistTermsHash: invoice.therapistTermsHash,
     insurerTermsHash: invoice.insurerTermsHash,
+    invoiceHash: invoice.invoiceHash,
   };
+
+  if (invoice.finalized) {
+    const data = await getFinalizedInvoiceData({ sessionId });
+    const pdfBuffer = await generateInvoicePdf({ sessionId });
+    const regeneratedHash = ethers.keccak256(pdfBuffer);
+
+    result.sessionRate = data.sessionRate;
+    result.franchiseRemaining = data.franchiseRemaining;
+    result.copayBps = data.copayBps;
+    result.platformFeeBps = data.platformFeeBps;
+    result.patientAmount = data.patientAmount;
+    result.insurerAmount = data.insurerAmount;
+    result.platformFeeAmount = data.platformFeeAmount;
+    result.therapistPayout = data.therapistPayout;
+    result.invoiceVerified = regeneratedHash === invoice.invoiceHash;
+  }
+
+  return result;
 }
 
 module.exports = {
@@ -418,6 +570,7 @@ module.exports = {
   confirmSession,
   attendSession,
   getConfirmationStatus,
+  generateInvoicePdf,
   finalizeInvoice,
   viewInvoice,
 };

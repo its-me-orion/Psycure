@@ -27,7 +27,8 @@
     "@hashgraph/sdk": "2.24.0",
     "dotenv": "^17.4.2",
     "ethers": "^6.17.0",
-    "express": "^4.22.2"
+    "express": "^4.22.2",
+    "pdfkit": "^0.19.1"
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.4"

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 require("dotenv").config();
 
+const fs = require("fs");
 const {
   createSession,
   getSessionTerms,
@@ -8,6 +9,7 @@ const {
   previewSplit,
   confirmSession,
   attendSession,
+  generateInvoicePdf,
   finalizeInvoice,
   viewInvoice,
 } = require("./psycureService");
@@ -92,22 +94,25 @@ async function handleConfirmSession(parsedArgs) {
 }
 
 async function handleFinalizeInvoice(parsedArgs) {
-  const defaultFeeBps = await getDefaultPlatformFeeBps();
   const result = await finalizeInvoice({
     sessionId: getRequiredArg(parsedArgs, "session-id"),
-    sessionRate: getRequiredArg(parsedArgs, "rate"),
-    franchiseRemaining: getRequiredArg(parsedArgs, "franchise"),
-    copayBps: getRequiredArg(parsedArgs, "copay-bps"),
-    platformFeeBps: parsedArgs["platform-fee-bps"] || defaultFeeBps,
   });
 
-  console.log("Invoice finalized on-chain (terms hash verified):");
+  console.log("Invoice finalized on-chain (invoice hash anchored, terms hash verified):");
   console.log(result);
 }
 
 async function handleViewInvoice(parsedArgs) {
   const result = await viewInvoice({ sessionId: getRequiredArg(parsedArgs, "session-id") });
   console.log(result);
+}
+
+async function handleInvoicePdf(parsedArgs) {
+  const sessionId = getRequiredArg(parsedArgs, "session-id");
+  const outPath = parsedArgs.out || `${sessionId}-invoice.pdf`;
+  const pdfBuffer = await generateInvoicePdf({ sessionId });
+  fs.writeFileSync(outPath, pdfBuffer);
+  console.log(`Invoice PDF written to ${outPath}`);
 }
 
 function printUsage() {
@@ -134,11 +139,17 @@ patient and therapist mirror the insurer's terms rather than typing their own):
      npm run cli -- attend-session --session-id S1 --role patient
      npm run cli -- attend-session --session-id S1 --role therapist
 
-  6) Finalize on-chain (contract re-checks the terms hash itself; requires both attendances too):
-     npm run cli -- finalize-invoice --session-id S1 --rate 18000 --franchise 10000 --copay-bps 1000
+  6) Finalize on-chain (renders the invoice as a PDF off-chain, anchors only its
+     hash — contract still re-checks the terms hash and both attendances itself):
+     npm run cli -- finalize-invoice --session-id S1
 
-  7) View the result:
+  7) View the result (confirmation/attendance status, plus the recomputed CHF split
+     once finalized):
      npm run cli -- view-invoice --session-id S1
+
+  8) Save the human-readable invoice locally (regenerated fresh each time, not stored
+     server-side):
+     npm run cli -- invoice-pdf --session-id S1 --out invoice.pdf
 
   Or run "npm run web" for the browser UI (separate insurer/patient/therapist pages).`);
 }
@@ -159,6 +170,7 @@ async function main() {
   if (command === "confirm-session") return handleConfirmSession(args);
   if (command === "finalize-invoice") return handleFinalizeInvoice(args);
   if (command === "view-invoice") return handleViewInvoice(args);
+  if (command === "invoice-pdf") return handleInvoicePdf(args);
 
   throw new Error(`Unknown command: ${command}`);
 }
