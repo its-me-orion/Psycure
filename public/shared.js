@@ -104,6 +104,12 @@ function renderInvoiceTable(container, invoice) {
     ["Therapist payout", `CHF ${rappenToChf(invoice.therapistPayout)}`],
   ];
 
+  const pdfHref = `/api/sessions/${encodeURIComponent(invoice.sessionId)}/invoice.pdf`;
+  const verifiedNote =
+    invoice.invoiceVerified === false
+      ? `<div class="invoice-result__warning">⚠ Regenerated PDF hash does not match the on-chain invoice hash.</div>`
+      : "";
+
   container.className = "invoice-result";
   container.innerHTML = `
     <table class="invoice-table">
@@ -114,6 +120,8 @@ function renderInvoiceTable(container, invoice) {
         )
         .join("")}
     </table>
+    ${verifiedNote}
+    <a class="invoice-result__pdf-link" href="${pdfHref}" target="_blank" rel="noopener">Download PDF invoice ↓</a>
   `;
 }
 

@@ -162,12 +162,10 @@ el("finalizeBtn").addEventListener("click", async () => {
   btn.disabled = true;
   const pendingEntry = addLedgerEntry({ title: "Finalizing invoice on-chain…", status: "pending" });
   try {
-    const result = await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/finalize`, {
-      sessionRate: loadedInsurerTerms.sessionRate,
-      franchiseRemaining: loadedInsurerTerms.franchiseRemaining,
-      copayBps: loadedInsurerTerms.copayBps,
-      platformFeeBps: loadedInsurerTerms.platformFeeBps,
-    });
+    // No financial terms in the request body anymore — the backend derives
+    // them itself from the confirmed HCS messages, renders the invoice PDF,
+    // and anchors only its hash on-chain.
+    const result = await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/finalize`);
     pendingEntry.remove();
     addLedgerEntry({ title: "Invoice finalized (terms hash verified on-chain)", meta: `tx ${result.transactionHash}` });
     const invoice = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/invoice`);

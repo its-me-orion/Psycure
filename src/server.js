@@ -10,6 +10,7 @@ const {
   confirmSession,
   attendSession,
   getConfirmationStatus,
+  generateInvoicePdf,
   finalizeInvoice,
   viewInvoice,
 } = require("./psycureService");
@@ -102,23 +103,37 @@ app.get(
   })
 );
 
-// Finalize on-chain — contract re-verifies the terms hash itself.
+// Finalize on-chain — generates the invoice PDF and anchors its hash; the
+// contract itself re-verifies the terms hash and attendance.
 app.post(
   "/api/sessions/:sessionId/finalize",
   asyncRoute(async (req, res) => {
     const { sessionId } = req.params;
-    const { sessionRate, franchiseRemaining, copayBps, platformFeeBps } = req.body;
-    const result = await finalizeInvoice({ sessionId, sessionRate, franchiseRemaining, copayBps, platformFeeBps });
+    const result = await finalizeInvoice({ sessionId });
     res.json(result);
   })
 );
 
-// Read the finalized (or pending) invoice from the contract.
+// Read the finalized (or pending) invoice status from the contract, plus the
+// off-chain-recomputed CHF split once finalized.
 app.get(
   "/api/sessions/:sessionId/invoice",
   asyncRoute(async (req, res) => {
     const result = await viewInvoice({ sessionId: req.params.sessionId });
     res.json(result);
+  })
+);
+
+// Download the human-readable invoice — regenerated fresh from the confirmed
+// HCS terms each time (deterministic), not stored anywhere server-side.
+app.get(
+  "/api/sessions/:sessionId/invoice.pdf",
+  asyncRoute(async (req, res) => {
+    const { sessionId } = req.params;
+    const pdfBuffer = await generateInvoicePdf({ sessionId });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="psycure-invoice-${sessionId}.pdf"`);
+    res.send(pdfBuffer);
   })
 );
 

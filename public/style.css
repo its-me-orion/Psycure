@@ -398,6 +398,27 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .invoice-table tr.highlight td { background: var(--clay-soft); font-weight: 600; }
 .invoice-table tr.highlight td:first-child { color: var(--teal-deep); }
 
+.invoice-result__pdf-link {
+  display: block;
+  padding: 11px 14px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal-deep);
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  text-decoration: none;
+}
+.invoice-result__pdf-link:hover { background: var(--clay-soft); }
+
+.invoice-result__warning {
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--rose);
+  background: var(--rose-soft);
+  border-top: 1px solid var(--line);
+}
+
 /* ---------- Ledger (signature element) ---------- */
 .ledger {
   background: var(--paper);
