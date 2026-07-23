@@ -1,11 +1,23 @@
 let loadedInsurerTerms = null; // { sessionRate, franchiseRemaining, copayBps, platformFeeBps, termsHash } in rappen/bps
 let therapistAttendedLocally = false; // set immediately on successful attend — the mirror node lags a few seconds behind
 
+// Session IDs are generated here, not typed by the therapist — that way
+// nothing meaningful (a patient name, a date, a guessable pattern) ends up
+// baked into an identifier that gets shared around. Short hex string, not a
+// full UUID, since it also has to be read aloud/typed by hand sometimes.
+function generateSessionId() {
+  return crypto.randomUUID().split("-")[0];
+}
+
 // ---------- Step 1: create session ----------
 el("createBtn").addEventListener("click", async () => {
-  const sessionId = currentSessionId();
+  const sessionId = generateSessionId();
   const btn = el("createBtn");
   btn.disabled = true;
+  // dispatchEvent so shared.js's chat-link wiring (which listens for real
+  // typing) also picks up this programmatic change.
+  el("sessionId").value = sessionId;
+  el("sessionId").dispatchEvent(new Event("input"));
   const pendingEntry = addLedgerEntry({ title: `Creating session ${sessionId}…`, status: "pending" });
   try {
     const result = await api("POST", "/api/sessions", {
@@ -20,12 +32,14 @@ el("createBtn").addEventListener("click", async () => {
     });
     pendingEntry.remove();
     addLedgerEntry({
-      title: `SESSION_CREATED · ${sessionId} · CHF ${el("f-rate").value}`,
-      meta: `topic ${result.topicId} · seq #${result.sequenceNumber}`,
+      titleHtml: `SESSION_CREATED · ${copyChip(sessionId)} · CHF ${el("f-rate").value}`,
+      metaHtml: `${hashscanLink(`topic/${result.topicId}`, `topic ${result.topicId}`)} · seq #${result.sequenceNumber}`,
     });
   } catch (err) {
     pendingEntry.remove();
     addLedgerEntry({ title: "Create session failed", meta: err.message, status: "error" });
+    el("sessionId").value = ""; // let them retry with a fresh generated ID
+    el("sessionId").dispatchEvent(new Event("input"));
   } finally {
     btn.disabled = false;
   }
@@ -167,7 +181,10 @@ el("finalizeBtn").addEventListener("click", async () => {
     // and anchors only its hash on-chain.
     const result = await api("POST", `/api/sessions/${encodeURIComponent(sessionId)}/finalize`);
     pendingEntry.remove();
-    addLedgerEntry({ title: "Invoice finalized (terms hash verified on-chain)", meta: `tx ${result.transactionHash}` });
+    addLedgerEntry({
+      title: "Invoice finalized (terms hash verified on-chain)",
+      metaHtml: `tx ${hashscanLink(`transaction/${result.transactionHash}`, result.transactionHash)}`,
+    });
     const invoice = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}/invoice`);
     renderInvoiceTable(el("invoiceResult"), invoice);
   } catch (err) {

@@ -34,7 +34,24 @@ function withSpin(btn, fn) {
   };
 }
 
-function addLedgerEntry({ title, meta, status = "ok" }) {
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Small inline "copy this value" button for IDs/hashes in the ledger — built
+// as an HTML string so it can be dropped into addLedgerEntry's titleHtml/metaHtml.
+function copyChip(value, label = value) {
+  return `${escapeHtml(label)}<button type="button" class="copy-btn" data-copy="${escapeHtml(value)}" title="Copy">⧉</button>`;
+}
+
+// Same idea for a value that's independently explorable on HashScan (a topic
+// or a transaction) — link instead of copy, since the point there is "go look
+// at this," not "paste this somewhere."
+function hashscanLink(path, label = path) {
+  return `<a class="ledger-link" href="https://hashscan.io/testnet/${path}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+}
+
+function addLedgerEntry({ title, titleHtml, meta, metaHtml, status = "ok" }) {
   const container = el("ledgerEntries");
   const empty = container.querySelector(".ledger__empty");
   if (empty) empty.remove();
@@ -44,18 +61,49 @@ function addLedgerEntry({ title, meta, status = "ok" }) {
 
   const titleEl = document.createElement("div");
   titleEl.className = "ledger-entry__title";
-  titleEl.textContent = title;
+  if (titleHtml) {
+    titleEl.innerHTML = titleHtml;
+  } else {
+    titleEl.textContent = title;
+  }
   entry.appendChild(titleEl);
 
-  if (meta) {
+  if (meta || metaHtml) {
     const metaEl = document.createElement("div");
     metaEl.className = "ledger-entry__meta";
-    metaEl.textContent = meta;
+    if (metaHtml) {
+      metaEl.innerHTML = metaHtml;
+    } else {
+      metaEl.textContent = meta;
+    }
     entry.appendChild(metaEl);
   }
 
   container.prepend(entry);
   return entry;
+}
+
+// Event delegation so this works for every entry, including ones added after
+// this listener is attached — the ledger container itself never changes.
+function wireLedgerCopyButtons() {
+  const container = el("ledgerEntries");
+  if (!container) return;
+  container.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".copy-btn");
+    if (!btn) return;
+    try {
+      await navigator.clipboard.writeText(btn.dataset.copy);
+      const original = btn.textContent;
+      btn.textContent = "✓";
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 1200);
+    } catch {
+      // clipboard permission denied — nothing sensible to do about it here
+    }
+  });
 }
 
 async function api(method, path, body) {
@@ -142,3 +190,4 @@ function wireChatLink() {
 
 checkNetwork();
 wireChatLink();
+wireLedgerCopyButtons();
