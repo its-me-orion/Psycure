@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Psycure — Verify Invoice</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      .verify-shell { max-width: 620px; margin: 0 auto; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+      .verify-field { margin-bottom: 16px; }
+      .verify-field label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; }
+      .verify-field input[type="file"] { width: 100%; font-family: var(--sans); font-size: 13.5px; color: var(--ink); }
+      .verify-result { margin-top: 18px; border-radius: 8px; padding: 16px; font-size: 13.5px; }
+      .verify-result--idle { border: 1px dashed var(--line); color: var(--ink-soft); text-align: center; }
+      .verify-result--ok { background: #DCEAE4; border: 1px solid #b7d8cb; color: var(--teal-deep); }
+      .verify-result--bad { background: var(--rose-soft); border: 1px solid #e3bdb7; color: var(--rose); }
+      .verify-result--warn { background: var(--clay-soft); border: 1px solid #e2c199; color: var(--clay); }
+      .verify-result__headline { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+      .verify-hash { font-family: var(--mono); font-size: 11px; word-break: break-all; opacity: 0.85; margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap" style="max-width: 720px;">
+      <header class="masthead">
+        <a href="index.html" class="masthead__mark" title="Back to start">
+          <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M17 2 L30 9 V19 C30 25.5 24 30.5 17 32 C10 30.5 4 25.5 4 19 V9 Z" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M12 17.5 L15.5 21 L22.5 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+        <div>
+          <h1>Psycure <span class="role-tag" style="background:#DCEAE4;color:var(--teal-deep);">Verify Invoice</span></h1>
+          <p class="masthead__sub">Upload an invoice PDF to check it against the hash anchored on Hedera testnet — no login or session access needed.</p>
+        </div>
+      </header>
+
+      <section class="verify-shell">
+        <div class="verify-field">
+          <label for="verifySessionId">Session ID (printed on the invoice)</label>
+          <input id="verifySessionId" type="text" placeholder="e.g. 64c85218" spellcheck="false" />
+        </div>
+        <div class="verify-field">
+          <label for="verifyFile">Invoice PDF</label>
+          <input id="verifyFile" type="file" accept="application/pdf" />
+        </div>
+        <button id="verifyBtn" class="primary-btn">Verify authenticity</button>
+
+        <div id="verifyResult" class="verify-result verify-result--idle">
+          Choose the session ID and the PDF file, then verify.
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const sessionInput = document.getElementById('verifySessionId');
+      const fileInput = document.getElementById('verifyFile');
+      const resultEl = document.getElementById('verifyResult');
+      const btn = document.getElementById('verifyBtn');
+
+      function setResult(variant, html) {
+        resultEl.className = `verify-result verify-result--${variant}`;
+        resultEl.innerHTML = html;
+      }
+
+      async function fileToBase64(file) {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+      }
+
+      btn.addEventListener('click', async () => {
+        const sessionId = sessionInput.value.trim();
+        const file = fileInput.files[0];
+        if (!sessionId) { setResult('warn', 'Enter the session ID printed on the invoice first.'); return; }
+        if (!file) { setResult('warn', 'Choose a PDF file first.'); return; }
+
+        btn.disabled = true;
+        setResult('idle', 'Verifying…');
+        try {
+          const pdfBase64 = await fileToBase64(file);
+          const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/verify-invoice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pdfBase64 }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+
+          if (!data.finalized) {
+            setResult('warn', "This session hasn't been finalized on-chain yet — there's nothing to verify against.");
+            return;
+          }
+          if (data.matches) {
+            setResult('ok', `
+              <div class="verify-result__headline">✓ Verified — matches the hash anchored on Hedera testnet</div>
+              <div class="verify-hash">uploaded: ${data.uploadedHash}</div>
+              <div class="verify-hash">on-chain: ${data.onChainHash}</div>
+            `);
+          } else {
+            setResult('bad', `
+              <div class="verify-result__headline">✗ Does not match — this file was altered or isn't the real invoice</div>
+              <div class="verify-hash">uploaded: ${data.uploadedHash}</div>
+              <div class="verify-hash">on-chain: ${data.onChainHash}</div>
+            `);
+          }
+        } catch (err) {
+          setResult('bad', `Could not verify: ${err.message}`);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

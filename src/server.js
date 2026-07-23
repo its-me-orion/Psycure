@@ -13,13 +13,16 @@ const {
   generateInvoicePdf,
   finalizeInvoice,
   viewInvoice,
+  verifyInvoicePdf,
 } = require("./psycureService");
 const { createConversation, sendMessage, listMessages } = require("./chatService");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+// Bumped from the 100kb default — the invoice-verification upload sends a
+// PDF as base64 JSON, which inflates ~33% over the raw file size.
+app.use(express.json({ limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 function asyncRoute(handler) {
@@ -134,6 +137,22 @@ app.get(
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="psycure-invoice-${sessionId}.pdf"`);
     res.send(pdfBuffer);
+  })
+);
+
+// Anyone with the PDF and the session ID can check it's the genuine,
+// unaltered invoice — no login or role access needed, this is just a hash
+// comparison against what's already public on-chain.
+app.post(
+  "/api/sessions/:sessionId/verify-invoice",
+  asyncRoute(async (req, res) => {
+    const { sessionId } = req.params;
+    const { pdfBase64 } = req.body;
+    if (!pdfBase64) {
+      return res.status(400).json({ error: "pdfBase64 is required" });
+    }
+    const result = await verifyInvoicePdf({ sessionId, pdfBuffer: Buffer.from(pdfBase64, "base64") });
+    res.json(result);
   })
 );
 

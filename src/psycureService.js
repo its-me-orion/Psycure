@@ -612,6 +612,27 @@ async function viewInvoice({ sessionId }) {
   return result;
 }
 
+/**
+ * Independent authenticity check for an invoice PDF someone hands you —
+ * hashes the uploaded bytes and compares against the invoiceHash anchored
+ * on-chain for that session. Deliberately doesn't require regenerating the
+ * PDF server-side to compare byte-for-byte; keccak256 already gives an
+ * all-or-nothing match, which is exactly what "was this file altered"
+ * needs.
+ */
+async function verifyInvoicePdf({ sessionId, pdfBuffer }) {
+  const invoice = await viewInvoice({ sessionId });
+  const uploadedHash = ethers.keccak256(pdfBuffer);
+
+  return {
+    sessionId,
+    finalized: invoice.finalized,
+    matches: invoice.finalized && uploadedHash === invoice.invoiceHash,
+    uploadedHash,
+    onChainHash: invoice.finalized ? invoice.invoiceHash : null,
+  };
+}
+
 module.exports = {
   toSessionHash,
   computeTermsHash,
@@ -625,4 +646,5 @@ module.exports = {
   generateInvoicePdf,
   finalizeInvoice,
   viewInvoice,
+  verifyInvoicePdf,
 };

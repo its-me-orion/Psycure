@@ -524,6 +524,30 @@ a.primary-btn, a.secondary-btn, a.ghost-btn {
   word-break: break-all;
 }
 
+.ledger-entry__meta a.ledger-link {
+  color: var(--teal-deep);
+  text-decoration: none;
+}
+.ledger-entry__meta a.ledger-link:hover { text-decoration: underline; }
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.copy-btn:hover:not(:disabled) { color: var(--teal-deep); }
+
 @keyframes enter {
   from { opacity: 0; transform: translateX(4px); }
   to { opacity: 1; transform: translateX(0); }
