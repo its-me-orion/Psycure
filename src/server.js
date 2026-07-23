@@ -196,6 +196,8 @@ app.post(
 
 app.listen(PORT, () => {
   console.log(`Psycure web UI running at http://localhost:${PORT}`);
-  console.log(`  Therapist view: http://localhost:${PORT}/therapist.html`);
-  console.log(`  Patient view:   http://localhost:${PORT}/patient.html`);
+  console.log(`  Therapist view    :   http://localhost:${PORT}/therapist.html`);
+  console.log(`  Patient view      :   http://localhost:${PORT}/patient.html`);
+  console.log(`  Insurer view      :   http://localhost:${PORT}/insurer.html`);
+  console.log(`  Verify PDF Invoice:   http://localhost:${PORT}/verify.html`);
 });
